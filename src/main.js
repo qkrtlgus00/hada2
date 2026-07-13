@@ -197,15 +197,14 @@ function restoreWindowState() {
       out.width = Math.round(s.width); out.height = Math.round(s.height);
     }
     if (Number.isFinite(s.x) && Number.isFinite(s.y)) {
-      // 저장된 위치가 어느 디스플레이 작업영역과 겹칠 때만 사용 (모니터 분리 시 화면 밖 방지)
+      // 저장된 위치가 '주(primary) 모니터' 작업영역과 겹칠 때만 복원.
+      // 보조 모니터/화면 밖 좌표면 무시 → Electron이 주 모니터 중앙에 배치(창을 잃어버리지 않게).
       try {
         const { screen } = require('electron');
         const w = out.width || 960, h = out.height || 720;
-        const onScreen = screen.getAllDisplays().some((d) => {
-          const a = d.workArea;
-          return s.x < a.x + a.width && s.x + w > a.x && s.y < a.y + a.height && s.y + h > a.y;
-        });
-        if (onScreen) { out.x = Math.round(s.x); out.y = Math.round(s.y); }
+        const a = screen.getPrimaryDisplay().workArea;
+        const onPrimary = s.x < a.x + a.width && s.x + w > a.x && s.y < a.y + a.height && s.y + h > a.y;
+        if (onPrimary) { out.x = Math.round(s.x); out.y = Math.round(s.y); }
       } catch (_) {}
     }
     return out;
@@ -301,6 +300,21 @@ function showMainWindow() {
   mainWindow.show();
   mainWindow.focus();
 }
+// 창을 주(primary) 모니터 중앙으로 이동해 보여주기 — 다른 모니터/화면 밖으로 사라졌을 때 복구
+function centerOnPrimary() {
+  if (!mainWindow || mainWindow.isDestroyed()) { createWindowSafe(); return; }
+  try {
+    const { screen } = require('electron');
+    const a = screen.getPrimaryDisplay().workArea;
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    const b = mainWindow.getBounds();
+    const w = Math.min(b.width, a.width), h = Math.min(b.height, a.height);
+    mainWindow.setBounds({ x: Math.round(a.x + (a.width - w) / 2), y: Math.round(a.y + (a.height - h) / 2), width: w, height: h });
+  } catch (_) {}
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
 function trayControl(action) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('tray:control', action);
 }
@@ -312,6 +326,7 @@ function createTray() {
   tray.setToolTip('하다');
   const menu = Menu.buildFromTemplate([
     { label: '열기', click: showMainWindow },
+    { label: '창 가운데로 (화면에 안 보일 때)', click: centerOnPrimary },
     { type: 'separator' },
     { label: '재생 / 일시정지', click: () => trayControl('playpause') },
     { label: '다음 곡', click: () => trayControl('next') },
