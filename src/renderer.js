@@ -1458,7 +1458,7 @@ function renderWorks() {
       `<div class="lsum income"><span>완료</span><strong>${cnt('완료')}건</strong></div>` +
       `<div class="lsum"><span>${label} 금액</span><strong>${formatWon(totalAll)}</strong></div>` +
       `<div class="lsum"><span>미완료 금액</span><strong>${formatWon(totalOpen)}</strong></div>` +
-      `<div class="lsum"><span>미수금</span><strong>${formatWon(scope.filter((d) => !d.paid).reduce((s, d) => s + (Number(d.amount) || 0), 0))}</strong></div>`;
+      `<div class="lsum"><span>미수금</span><strong>${formatWon(scope.filter((d) => d.status === '완료' && !d.paid).reduce((s, d) => s + (Number(d.amount) || 0), 0))}</strong></div>`;
   }
 
   const items = prefs.manual.works ? [...scope] : [...scope].sort((a, b) =>
