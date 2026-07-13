@@ -661,7 +661,7 @@ function applyGlassCss() {
     const fog = clampInt(prefs.blurIntensity, 0, 100, 30); // 흐림(프로스트) 강도 = '블러 강도' 슬라이더
     r.setProperty('--bg-opaque', Math.max(Math.round(op * 0.5), 30) + '%');      // 밀키 베이스
     r.setProperty('--surface-opaque', Math.max(Math.round(op * 0.7), 55) + '%'); // 표면
-    r.setProperty('--frost-veil', (18 + Math.round(fog * 0.5)) + '%');           // 18~68% 흰 막(흐림 강도)
+    r.setProperty('--frost-veil', (15 + Math.round(fog * 0.8)) + '%');           // 15~95% 흰 막(흐림 강도, 100=거의 꽉 참)
     r.setProperty('--glass-blur', '0px');
     return;
   }
