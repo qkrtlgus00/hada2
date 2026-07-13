@@ -165,8 +165,6 @@ function startAppServer() {
 let bootShell = { windowOpacity: 100, backgroundMaterial: 'none', uiScale: 100 };
 // 런타임 상태 — 투명도는 앱 내부(CSS)에서 처리하므로 여기선 블러 재질만 추적
 let shellState = { material: 'none' };
-// 창이 transparent:true로 생성됐는지 추적 (재질=비투명창, none=투명창). 재질 변경 시 재시작 필요 판단용.
-let winIsTransparent = true;
 
 function clampInt(v, min, max, dflt) {
   const n = Math.round(Number(v));
@@ -225,8 +223,6 @@ function saveWindowStateDebounced() { if (wsaveTimer) clearTimeout(wsaveTimer); 
 
 function createWindow(useFileFallback) {
   const winState = restoreWindowState();
-  // 재질(미카/아크릴) 사용 시 비투명창(#00000000), 'none'이면 진짜 투명창.
-  winIsTransparent = (bootShell.backgroundMaterial === 'none');
   mainWindow = new BrowserWindow({
     width: winState.width || 960,
     height: winState.height || 720,
@@ -236,12 +232,10 @@ function createWindow(useFileFallback) {
     title: '하다 — 할 일 & 메모',
     // 진짜 투명창: 프레임 제거 + 투명 처리 → 투명도 낮추면 바탕화면이 실제로 비침.
     // (앱이 직접 그린 #titlebar로 이동·최소/최대/닫기, 리사이즈는 프레임리스 기본 동작)
-    // 재질(미카/아크릴)을 쓸 땐 transparent:true 대신 #00000000 비투명창으로 만든다.
-    // transparent:true + 재질 조합은 다른 창을 만질 때(창 비활성) 투명이 확 사라졌다
-    // 돌아오는 DWM/Chromium 비동기 버그가 있음 → 비투명창이면 그 "확 깜빡"이 사라진다.
-    // 'none'(선명 비침/불투명)일 때만 진짜 투명창을 유지한다.
+    // 재질(mica/acrylic)은 생성 시 투명창과 충돌할 수 있어 런타임(applyShell)에서만 적용.
+    // ※ 비투명창(#00000000)은 투명 픽셀이 클릭 통과 + 바탕 안 비침 문제가 있어 쓰지 않음.
     frame: false,
-    transparent: winIsTransparent,
+    transparent: true,
     backgroundColor: '#00000000',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -252,10 +246,6 @@ function createWindow(useFileFallback) {
     },
   });
   shellState.material = 'none';
-  // 비투명창이면 첫 페인트 전에 재질을 바로 켜 검은 깜빡임 방지
-  if (!winIsTransparent && (bootShell.backgroundMaterial === 'mica' || bootShell.backgroundMaterial === 'acrylic')) {
-    try { mainWindow.setBackgroundMaterial(bootShell.backgroundMaterial); shellState.material = bootShell.backgroundMaterial; } catch (_) {}
-  }
 
   // 최대화 상태 변화를 렌더러에 알림 (타이틀바 최대화/복원 아이콘 교체)
   const sendMax = () => {
@@ -469,12 +459,11 @@ ipcMain.handle('window:setMaterial', (_e, m) => {
   if (m !== 'none' && !materialSupported()) return { ok: false, reason: 'UNSUPPORTED' };
   if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, reason: 'NO_WINDOW' };
   try {
-    // 재질을 쓰면 창은 비투명(#00000000), 'none'이면 투명창이어야 한다.
-    // 이상적 투명 플래그가 현재 창 생성값(winIsTransparent)과 다르면 완전 적용에 재시작 필요.
-    const wantTransparent = (m === 'none');
+    // 창이 항상 투명(transparent:true)이므로 backgroundColor는 계속 투명 유지.
+    // 재질(mica/acrylic)만 켜고 끈다 — 없음이어도 CSS 투명도로 바탕화면이 비침.
     shellState.material = m;
     mainWindow.setBackgroundMaterial(m === 'none' ? 'none' : m);
-    return { ok: true, needsRestart: wantTransparent !== winIsTransparent };
+    return { ok: true };
   } catch (e) {
     try { mainWindow.setBackgroundMaterial('none'); } catch (_) {}
     shellState.material = 'none';
