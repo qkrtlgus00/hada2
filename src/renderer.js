@@ -32,6 +32,7 @@ let ledger = [];      // [{id,date,type,amount,category,memo}]
 let works = [];
 let notes = [];       // [{id,text,updatedAt}]
 let habits = [];      // [{id,name,log:{ymd:true}}]
+let alarms = [];      // [{id,at:'YYYY-MM-DDTHH:MM',title}] 사용자가 지정한 날짜+시간 알람
 let playlist = [];    // [{id,title,url,videoId,listId}]
 let banner = '';      // 홈 배너 dataURL
 let bannerCfg = { height: 180, zoom: 100 }; // 배너 높이(px)·줌(%)
@@ -382,7 +383,7 @@ function deadlineRemindAt(due, slot) {
   return d.getTime();
 }
 // 지금 울려야 할 알림 목록 (순수). silent=true 는 "너무 늦음 → 발송 없이 기록만"
-function dueReminders(evs, dls, fired, now, notifyDl) {
+function dueReminders(evs, dls, alrms, fired, now, notifyDl) {
   const out = [];
   const push = (key, at, title, body) => {
     if (!Number.isFinite(at) || fired[key] || now < at) return;
@@ -400,6 +401,10 @@ function dueReminders(evs, dls, fired, now, notifyDl) {
       push(workRemindKey(dl, 'D0'), deadlineRemindAt(dl.due, 'D0'), '마감 알림', `오늘 마감: ${dl.title}`);
     }
   }
+  for (const a of alrms || []) {
+    if (!a || !a.at) continue;
+    push('alarm:' + a.id, new Date(a.at).getTime(), '알람', a.title || '알람');
+  }
   return out;
 }
 
@@ -411,7 +416,7 @@ let saveTimer = null;
 let saveRetry = null;
 let saveDirty = false; // 예약/미완료 저장이 있으면 true (종료 시 flush 판단용)
 function snapshot() {
-  return { events, todos, recurring, ledger, works, notes, habits, playlist, banner, bannerCfg, stickers, prefs, firedReminders };
+  return { events, todos, recurring, ledger, works, notes, habits, alarms, playlist, banner, bannerCfg, stickers, prefs, firedReminders };
 }
 function scheduleSave() {
   saveDirty = true;
@@ -478,6 +483,7 @@ function render() {
   renderMiniCal();
   renderTodos();
   renderRecurring();
+  renderAlarms();
 }
 
 function renderCatFilters() {
@@ -991,7 +997,7 @@ function notifyToday() {
 function checkReminders() {
   const now = Date.now();
   let changed = false;
-  for (const h of dueReminders(events, works, firedReminders, now, prefs.notifyDeadlines !== false)) {
+  for (const h of dueReminders(events, works, alarms, firedReminders, now, prefs.notifyDeadlines !== false)) {
     firedReminders[h.key] = now;
     changed = true;
     if (!h.silent && window.api && window.api.notify) window.api.notify(h.title, h.body);
@@ -1302,6 +1308,31 @@ function renderRecGrid() {
       scheduleSave(); renderRecGrid();
     });
     grid.appendChild(b);
+  }
+}
+
+// ---- 알람 (사용자 지정 날짜+시간에 1회 알림) ----
+function fmtAlarmAt(at) {
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return String(at || '');
+  let h = d.getHours(); const min = String(d.getMinutes()).padStart(2, '0');
+  const ap = h < 12 ? '오전' : '오후'; h %= 12; if (h === 0) h = 12;
+  return `${d.getMonth() + 1}월 ${d.getDate()}일 ${ap} ${h}:${min}`;
+}
+function renderAlarms() {
+  const list = $('#alarm-list'); if (!list) return;
+  list.innerHTML = '';
+  const now = Date.now();
+  const sorted = alarms.slice().sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+  for (const a of sorted) {
+    const past = new Date(a.at).getTime() < now; // 이미 지난(울린) 알람은 흐리게
+    const li = document.createElement('li');
+    li.className = 'mini-item' + (past ? ' done' : '');
+    const sp = document.createElement('span'); sp.className = 'mini-item-text'; sp.textContent = a.title || '알람';
+    const tag = document.createElement('em'); tag.className = 'mini-tag'; tag.textContent = fmtAlarmAt(a.at);
+    const del = document.createElement('button'); del.className = 'mini-del'; del.textContent = '×';
+    del.addEventListener('click', () => { alarms = alarms.filter((x) => x.id !== a.id); scheduleSave(); renderAlarms(); });
+    li.append(sp, tag, del); list.appendChild(li);
   }
 }
 
@@ -2055,7 +2086,7 @@ function renderStickers() {
 // ---- 데이터 백업 ----
 async function exportData() {
   if (!(window.api.data && window.api.data.export)) { toast('업데이트가 필요해요(백업 기능).'); return; }
-  const payload = { events, todos, recurring, ledger, works, notes, habits, playlist, banner, bannerCfg, stickers, prefs, firedReminders };
+  const payload = { events, todos, recurring, ledger, works, notes, habits, alarms, playlist, banner, bannerCfg, stickers, prefs, firedReminders };
   const r = await window.api.data.export(payload);
   if (r && r.ok) toast('데이터를 저장했어요.');
   else if (r && r.error && r.error !== 'CANCELED') toast('내보내기 실패: ' + r.error);
@@ -2069,7 +2100,7 @@ async function importData() {
   events = Array.isArray(d.events) ? d.events : migrate(d);
   todos = arr('todos'); recurring = arr('recurring'); ledger = arr('ledger');
   works = loadWorks(d); // 신형 works 또는 구형 deadlines+commissions 자동 병합
-  notes = arr('notes'); habits = arr('habits');
+  notes = arr('notes'); habits = arr('habits'); alarms = arr('alarms');
   playlist = arr('playlist');
   banner = typeof d.banner === 'string' ? d.banner : '';
   bannerCfg = (d.bannerCfg && typeof d.bannerCfg === 'object') ? { height: 180, zoom: 100, posX: 50, posY: 50, ...d.bannerCfg } : { height: 180, zoom: 100, posX: 50, posY: 50 };
@@ -2265,6 +2296,18 @@ function bindUI() {
     $('#recurring-input').value = ''; scheduleSave(); renderRecurring();
   });
 
+  const alarmForm = $('#alarm-form');
+  if (alarmForm) alarmForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const when = $('#alarm-when').value; // 'YYYY-MM-DDTHH:MM'
+    if (!when) { toast('알람 날짜·시간을 골라주세요.'); return; }
+    const title = $('#alarm-input').value.trim();
+    alarms.unshift({ id: crypto.randomUUID(), at: when, title });
+    $('#alarm-input').value = ''; $('#alarm-when').value = '';
+    scheduleSave(); renderAlarms(); checkReminders();
+    toast('알람을 추가했어요.');
+  });
+
   // 가계부
   // 가계부 수입/지출 토글
   $('#l-type-toggle').querySelectorAll('.seg-btn').forEach((b) => {
@@ -2456,6 +2499,7 @@ async function init() {
     works = loadWorks(data); // 신형 works 또는 구형 deadlines+commissions 자동 병합
     notes = arr('notes');
     habits = arr('habits');
+    alarms = arr('alarms');
     playlist = arr('playlist');
     banner = typeof data.banner === 'string' ? data.banner : '';
     bannerCfg = (data.bannerCfg && typeof data.bannerCfg === 'object') ? { height: 180, zoom: 100, posX: 50, posY: 50, ...data.bannerCfg } : { height: 180, zoom: 100, posX: 50, posY: 50 };

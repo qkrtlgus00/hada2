@@ -15,6 +15,10 @@ app.setName('hada2');
 // 숨은 창에서 유튜브 오디오를 자동재생하려면 사용자 제스처 요구를 꺼야 함
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
+// 투명(frameless transparent) 창이 잠깐씩 불투명해졌다 창을 움직이면 돌아오는 깜빡임(DWM/GPU 합성 경쟁) 방지.
+// GPU 래스터라이즈는 유지하고 레이어 합성만 CPU로 → 투명도 안정화.
+app.commandLine.appendSwitch('disable-gpu-compositing');
+
 // 데이터 파일 경로: OS별 사용자 데이터 폴더 안에 저장
 const DATA_FILE = path.join(app.getPath('userData'), 'data.json');
 

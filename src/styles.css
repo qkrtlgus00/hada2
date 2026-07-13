@@ -720,6 +720,9 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
 .mini-add { display: flex; gap: 6px; margin-bottom: 8px; }
 .mini-add input[type="text"] { flex: 1; min-width: 0; background: var(--surface); border: 1px solid var(--border-2); color: var(--text); border-radius: 9px; padding: 7px 10px; font-size: 13px; }
 .mini-add .add-btn { padding: 7px 12px; }
+/* 알람 추가 폼: 날짜+시간(datetime-local)은 한 줄 전체, 메모+버튼은 다음 줄 */
+.alarm-add { flex-wrap: wrap; }
+.alarm-add #alarm-when { flex: 1 1 100%; min-width: 0; background: var(--surface); border: 1px solid var(--border-2); color: var(--text); border-radius: 9px; padding: 6px 10px; font-size: 12.5px; font-family: inherit; }
 .mini-select { background: var(--surface); border: 1px solid var(--border-2); color: var(--text); border-radius: 9px; padding: 7px 8px; font-size: 12.5px; font-family: inherit; }
 .mini-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .mini-item { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 3px 2px; }

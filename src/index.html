@@ -126,6 +126,17 @@
             </form>
             <ul class="mini-list" id="recurring-list"></ul>
           </div>
+
+          <!-- 알람 (날짜+시간 지정 → 그 시각에 알림) -->
+          <div class="side-card">
+            <div class="side-card-head"><h3>알람</h3></div>
+            <form id="alarm-form" class="mini-add alarm-add" autocomplete="off">
+              <input id="alarm-when" type="datetime-local" />
+              <input id="alarm-input" type="text" maxlength="80" placeholder="알람 메모 (선택)" />
+              <button type="submit" class="add-btn">+</button>
+            </form>
+            <ul class="mini-list" id="alarm-list"></ul>
+          </div>
         </aside>
 
         <div class="schedule-right">
