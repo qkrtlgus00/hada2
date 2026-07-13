@@ -1937,6 +1937,7 @@ function renderStickers() {
       const resize = document.createElement('div'); resize.className = 'st-handle st-resize'; resize.title = '드래그로 크기 조절';
       resize.addEventListener('pointerdown', (e) => {
         e.stopPropagation(); e.preventDefault();
+        selectedStickerId = s.id; markStickerSelection(); // 크기조절 시작 시 툴바·핸들 고정
         const startX = e.clientX, startW = s.w || 120;
         resize.setPointerCapture(e.pointerId);
         const move = (ev) => { s.w = Math.max(40, Math.min(600, startW + (ev.clientX - startX))); el.style.width = s.w + 'px'; };
@@ -1948,6 +1949,7 @@ function renderStickers() {
       const rotH = document.createElement('div'); rotH.className = 'st-handle st-rot'; rotH.title = '드래그로 회전 (Shift=15° 스냅)';
       rotH.addEventListener('pointerdown', (e) => {
         e.stopPropagation(); e.preventDefault();
+        selectedStickerId = s.id; markStickerSelection(); // 회전 시작 시 툴바·핸들 고정
         const rect = el.getBoundingClientRect();
         const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
         rotH.setPointerCapture(e.pointerId);
@@ -1974,7 +1976,10 @@ function renderStickers() {
       const offY = e.clientY - layerRect.top - (s.y || 0);
       el.setPointerCapture(e.pointerId);
       const move = (ev) => {
-        if (!moved && Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) > 4) moved = true;
+        if (!moved && Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) > 4) {
+          moved = true;
+          selectedStickerId = s.id; markStickerSelection(); // 드래그 시작 즉시 툴바 고정(따라다니게)
+        }
         if (locked || !moved) return; // 잠금은 이동 불가; 임계 넘기 전엔 대기(클릭 판정용)
         el.classList.add('dragging');
         s.x = Math.max(0, ev.clientX - layerRect.left - offX);
