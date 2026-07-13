@@ -1886,7 +1886,10 @@ async function addSticker() {
   if (!(window.api.image && window.api.image.pick)) { toast('업데이트가 필요해요(스티커).'); return; }
   const r = await window.api.image.pick();
   if (!r || !r.ok) { if (r && r.error && r.error !== 'CANCELED') toast('이미지 오류: ' + r.error); return; }
-  stickers.push({ id: crypto.randomUUID(), view: currentView, src: r.dataUrl, x: 40, y: 40, w: 120, rot: 0, opacity: 100, locked: false });
+  const _layer = $('#sticker-layer');
+  const _lw = (_layer && _layer.clientWidth) || 800, _lh = (_layer && _layer.clientHeight) || 400;
+  const fx = Math.min(0.9, 100 / _lw), fy = Math.min(0.9, 100 / _lh); // 중심을 레이어 분수로(좌상단 근처)
+  stickers.push({ id: crypto.randomUUID(), view: currentView, src: r.dataUrl, fx, fy, w: 120, rot: 0, opacity: 100, locked: false });
   scheduleSave(); renderStickers();
   toast('스티커를 추가했어요. 드래그로 이동, 모서리로 크기/회전, 위 버튼으로 꾸며요.');
 }
@@ -1905,11 +1908,20 @@ function renderStickers() {
     const el = document.createElement('div');
     el.className = 'sticker' + (locked ? ' locked' : '') + (s.id === selectedStickerId ? ' selected' : '');
     el.dataset.id = s.id;
-    el.style.left = (s.x || 0) + 'px';
-    el.style.top = (s.y || 0) + 'px';
     el.style.width = (s.w || 120) + 'px';
-    el.style.transform = 'rotate(' + rot + 'deg)';
     el.style.opacity = String(Math.max(0, Math.min(100, opacity)) / 100);
+    const hasFrac = (typeof s.fx === 'number' && typeof s.fy === 'number');
+    if (hasFrac) {
+      // 위치를 레이어의 분수(중심 기준)로 → 창 크기가 바뀌어도 CSS가 상대 위치(가운데면 가운데) 유지
+      el.style.left = (s.fx * 100) + '%';
+      el.style.top = (s.fy * 100) + '%';
+      el.style.transform = 'translate(-50%, -50%) rotate(' + rot + 'deg)';
+    } else {
+      // 옛 절대 px 스티커: 우선 그대로 그리고 이미지 로드 후 중심 분수로 마이그레이션
+      el.style.left = (s.x || 0) + 'px';
+      el.style.top = (s.y || 0) + 'px';
+      el.style.transform = 'rotate(' + rot + 'deg)';
+    }
     const img = document.createElement('img'); img.src = s.src; img.draggable = false; img.alt = '스티커';
     el.appendChild(img);
 
@@ -1930,7 +1942,26 @@ function renderStickers() {
       tools.appendChild(mkBtn('×', '삭제', () => { stickers = stickers.filter((x) => x.id !== s.id); scheduleSave(); renderStickers(); }));
     }
     el.appendChild(tools);
-    if ((s.y || 0) < 40) tools.classList.add('below'); // 위쪽이면 툴바를 아래로 (잘림 방지)
+    // 이미지 로드(높이 확정) 후: 옛 px면 중심 분수로 마이그레이션, 그리고 툴바 위/아래(잘림 방지) 판정
+    const onReady = () => {
+      if (!el.isConnected) return; // 이전 렌더의 잔류 콜백(분리된 요소) 무시 → 잘못된 좌표(0) 저장 방지
+      const lw = layer.clientWidth || 1, lh = layer.clientHeight || 1;
+      const lr = layer.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      if (r.width < 1 || lr.width < 1) return; // 아직 레이아웃 전(뷰 숨김 등) → 다음 렌더에서 재시도
+      if (typeof s.fx !== 'number' || typeof s.fy !== 'number') {
+        s.fx = Math.max(0, Math.min(1, (r.left + r.width / 2 - lr.left) / lw));
+        s.fy = Math.max(0, Math.min(1, (r.top + r.height / 2 - lr.top) / lh));
+        el.style.left = (s.fx * 100) + '%';
+        el.style.top = (s.fy * 100) + '%';
+        el.style.transform = 'translate(-50%, -50%) rotate(' + (Number(s.rot) || 0) + 'deg)';
+        scheduleSave();
+      }
+      tools.classList.toggle('below', (r.top - lr.top) < 40);
+    };
+    // setTimeout(백그라운드 창에서도 실행 — rAF는 창이 가려지면 멈춰 마이그레이션이 안 됨)
+    if (img.complete && img.naturalHeight) setTimeout(onReady, 0);
+    else img.addEventListener('load', onReady);
 
     if (!locked) {
       // 크기 조절 핸들 (우하단)
@@ -1957,7 +1988,7 @@ function renderStickers() {
           let deg = Math.atan2(ev.clientY - cy, ev.clientX - cx) * 180 / Math.PI + 90;
           if (ev.shiftKey) deg = Math.round(deg / 15) * 15;
           s.rot = Math.round(deg);
-          el.style.transform = 'rotate(' + s.rot + 'deg)';
+          el.style.transform = (typeof s.fx === 'number' ? 'translate(-50%, -50%) ' : '') + 'rotate(' + s.rot + 'deg)';
         };
         const up = () => { rotH.removeEventListener('pointermove', move); rotH.removeEventListener('pointerup', up); scheduleSave(); };
         rotH.addEventListener('pointermove', move); rotH.addEventListener('pointerup', up);
@@ -1972,8 +2003,12 @@ function renderStickers() {
       const startX = e.clientX, startY = e.clientY;
       let moved = false;
       const layerRect = layer.getBoundingClientRect();
-      const offX = e.clientX - layerRect.left - (s.x || 0);
-      const offY = e.clientY - layerRect.top - (s.y || 0);
+      const lw = layer.clientWidth || 1, lh = layer.clientHeight || 1;
+      const rr = el.getBoundingClientRect();
+      const cx0 = rr.left + rr.width / 2 - layerRect.left; // 현재 중심(px, 레이어 기준)
+      const cy0 = rr.top + rr.height / 2 - layerRect.top;
+      const offX = e.clientX - layerRect.left - cx0; // 커서와 중심의 차
+      const offY = e.clientY - layerRect.top - cy0;
       el.setPointerCapture(e.pointerId);
       const move = (ev) => {
         if (!moved && Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) > 4) {
@@ -1982,10 +2017,14 @@ function renderStickers() {
         }
         if (locked || !moved) return; // 잠금은 이동 불가; 임계 넘기 전엔 대기(클릭 판정용)
         el.classList.add('dragging');
-        s.x = Math.max(0, ev.clientX - layerRect.left - offX);
-        s.y = Math.max(0, ev.clientY - layerRect.top - offY);
-        el.style.left = s.x + 'px'; el.style.top = s.y + 'px';
-        tools.classList.toggle('below', s.y < 40); // 위/아래로 끌 때 툴바 위치 실시간 전환
+        // 중심을 레이어의 분수로 저장 → 창 크기 바뀌어도 상대 위치(가운데) 유지
+        s.fx = Math.max(0, Math.min(1, (ev.clientX - layerRect.left - offX) / lw));
+        s.fy = Math.max(0, Math.min(1, (ev.clientY - layerRect.top - offY) / lh));
+        el.style.left = (s.fx * 100) + '%';
+        el.style.top = (s.fy * 100) + '%';
+        el.style.transform = 'translate(-50%, -50%) rotate(' + (Number(s.rot) || 0) + 'deg)';
+        const r2 = el.getBoundingClientRect();
+        tools.classList.toggle('below', (r2.top - layerRect.top) < 40); // 위/아래로 끌 때 툴바 위치 실시간 전환
       };
       const up = () => {
         el.classList.remove('dragging');
@@ -2364,6 +2403,20 @@ function bindUI() {
   // 스티커 바깥을 누르면 선택 해제(버튼 툴바 숨김). 스티커/버튼 위 클릭은 유지.
   document.addEventListener('pointerdown', (e) => {
     if (selectedStickerId && !e.target.closest('.sticker')) { selectedStickerId = null; markStickerSelection(); }
+  });
+  // 창 크기가 바뀌면 위치는 CSS(%)가 알아서 따라가고, 툴바 위/아래(잘림 방지) 방향만 다시 판정
+  let stickerResizeTO = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(stickerResizeTO);
+    stickerResizeTO = setTimeout(() => {
+      const layer = $('#sticker-layer'); if (!layer) return;
+      const lr = layer.getBoundingClientRect();
+      layer.querySelectorAll('.sticker').forEach((el) => {
+        const tools = el.querySelector('.sticker-tools'); if (!tools) return;
+        const r = el.getBoundingClientRect();
+        tools.classList.toggle('below', (r.top - lr.top) < 40);
+      });
+    }, 150);
   });
 }
 
