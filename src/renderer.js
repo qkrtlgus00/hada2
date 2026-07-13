@@ -646,18 +646,29 @@ function applyGlassCss() {
   // 불투명 모드: 표면을 100% 불투명 + 각진 모서리로 강제(즉시 전환, 창은 계속 투명이지만 완전 솔리드처럼 보임)
   if (!prefs.windowTransparent) {
     root.classList.add('app-opaque');
+    root.classList.remove('glass-frost');
     root.style.setProperty('--bg-opaque', '100%');
     root.style.setProperty('--surface-opaque', '100%');
     root.style.setProperty('--glass-blur', '0px');
     return;
   }
   root.classList.remove('app-opaque');
+  const r = document.documentElement.style;
+  // 뿌연 유리(프로스트): 네이티브 재질 없이 CSS 우윳빛 막 → 바탕 은은히 비침, 깜빡임 없음(재질 안 켬)
+  if (prefs.backgroundMaterial === 'frost') {
+    root.classList.add('glass-frost');
+    const op = clampInt(prefs.windowOpacity, 15, 100, 100);
+    r.setProperty('--bg-opaque', Math.max(Math.round(op * 0.5), 32) + '%');      // 밀키 하한 32%
+    r.setProperty('--surface-opaque', Math.max(Math.round(op * 0.7), 50) + '%'); // 표면 하한 50%
+    r.setProperty('--glass-blur', '0px');
+    return;
+  }
+  root.classList.remove('glass-frost');
   // '블러 강도'(0~100)는 재질(미카/아크릴)과 무관하게 항상 적용 — 실제 블러 + 비침을 함께 키움
   const base = clampInt(prefs.windowOpacity, 15, 100, 100);           // 15~100
   const extra = clampInt(prefs.blurIntensity, 0, 100, 30);            // 0~100
   const bg = Math.max(base - extra, 4);                      // 페이지 여백: 하한 4%
   const surface = Math.max(base - Math.round(extra * 0.6), 12); // 표면: 하한 12%(가독성은 text-shadow로 보호)
-  const r = document.documentElement.style;
   r.setProperty('--bg-opaque', bg + '%');
   r.setProperty('--surface-opaque', surface + '%');
   r.setProperty('--glass-blur', Math.round(extra * 0.28) + 'px'); // 0~100 → 0~28px 실제 backdrop 블러
@@ -670,7 +681,8 @@ async function applyShell() {
     materialOk = !!(st && st.materialSupported);
     document.body.classList.toggle('is-max', !!(st && st.maximized));
   } catch (_) {}
-  if (prefs.backgroundMaterial !== 'none') {
+  // 네이티브 재질은 미카/아크릴만 (없음·뿌연은 네이티브 'none' → CSS로 처리, 깜빡임 없음)
+  if (prefs.backgroundMaterial === 'mica' || prefs.backgroundMaterial === 'acrylic') {
     const r = await window.api.win.setMaterial(prefs.backgroundMaterial).catch(() => null);
     if (!r || !r.ok) prefs.backgroundMaterial = 'none'; // 미지원/실패 → 설정 자가치유
   }
@@ -693,7 +705,8 @@ function syncShellControls() {
   const seg = $('#w-material');
   if (seg) seg.querySelectorAll('.seg-btn').forEach((b) => {
     b.classList.toggle('on', b.dataset.m === prefs.backgroundMaterial);
-    const unsupported = b.dataset.m !== 'none' && !materialOk;
+    // 미카/아크릴만 네이티브 지원 필요 (없음·뿌연은 CSS라 항상 사용 가능)
+    const unsupported = (b.dataset.m === 'mica' || b.dataset.m === 'acrylic') && !materialOk;
     b.disabled = unsupported;
     b.title = unsupported ? 'Windows 11(22H2 이상)에서만 지원돼요.' : '';
   });
@@ -2112,7 +2125,7 @@ async function importData() {
     // 가져온 설정 정규화 (범위 밖 값 방지)
     prefs.ytVolume = clampInt(prefs.ytVolume, 0, 100, 100);
     prefs.windowOpacity = clampInt(prefs.windowOpacity, 15, 100, 100);
-    prefs.backgroundMaterial = ['none', 'mica', 'acrylic'].includes(prefs.backgroundMaterial) ? prefs.backgroundMaterial : 'none';
+    prefs.backgroundMaterial = ['none', 'frost', 'mica', 'acrylic'].includes(prefs.backgroundMaterial) ? prefs.backgroundMaterial : 'none';
     prefs.blurIntensity = clampInt(prefs.blurIntensity, 0, 100, 30);
     prefs.uiScale = clampInt(prefs.uiScale, 80, 150, 100);
     prefs.windowTransparent = (typeof prefs.windowTransparent === 'boolean') ? prefs.windowTransparent : false;
@@ -2244,12 +2257,16 @@ function bindUI() {
   const wMat = $('#w-material');
   if (wMat) wMat.querySelectorAll('.seg-btn').forEach((b) => b.addEventListener('click', async () => {
     if (!window.api.win) return;
-    const r = await window.api.win.setMaterial(b.dataset.m);
+    const m = b.dataset.m;
+    const nativeM = (m === 'mica' || m === 'acrylic') ? m : 'none'; // 없음·뿌연 → 네이티브 none(깜빡임 없음)
+    const r = await window.api.win.setMaterial(nativeM);
     if (!r || !r.ok) {
       toast(r && r.reason === 'UNSUPPORTED' ? '블러는 Windows 11(22H2 이상)에서만 지원돼요.' : '블러를 적용할 수 없어요.');
       return;
     }
-    prefs.backgroundMaterial = b.dataset.m;
+    prefs.backgroundMaterial = m;
+    // 재질·뿌연 유리는 투명이 켜져 있어야 보임 → 자동 ON
+    if (m !== 'none' && !prefs.windowTransparent) prefs.windowTransparent = true;
     applyGlassCss(); syncShellControls(); scheduleSave();
   }));
   const wGl = $('#w-glass');
@@ -2524,7 +2541,7 @@ async function init() {
   prefs.sidebarCollapsed = (typeof p.sidebarCollapsed === 'boolean') ? p.sidebarCollapsed : (lsGet('sidebarCollapsed', '0') === '1');
   prefs.ytVolume = clampInt(p.ytVolume, 0, 100, 100);
   prefs.windowOpacity = clampInt(p.windowOpacity, 15, 100, 100);
-  prefs.backgroundMaterial = ['none', 'mica', 'acrylic'].includes(p.backgroundMaterial) ? p.backgroundMaterial : 'none';
+  prefs.backgroundMaterial = ['none', 'frost', 'mica', 'acrylic'].includes(p.backgroundMaterial) ? p.backgroundMaterial : 'none';
   prefs.blurIntensity = clampInt(p.blurIntensity, 0, 100, 30);
   prefs.uiScale = clampInt(p.uiScale, 80, 150, 100);
   prefs.windowTransparent = (typeof p.windowTransparent === 'boolean') ? p.windowTransparent : false;

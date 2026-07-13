@@ -81,6 +81,15 @@ body {
 /* 불투명 모드·최대화 시 각진 모서리 (투명 모드에서만 둥근 코너) */
 :root.app-opaque body, body.is-max { border-radius: 0; }
 
+/* 뿌연 유리(프로스트): 네이티브 재질 없이 CSS 반투명 우윳빛 막 → 바탕화면이 은은하게 비침(진짜 블러는 아니지만 깜빡임 없음) */
+:root.glass-frost body {
+  background:
+    linear-gradient(155deg,
+      color-mix(in srgb, var(--page-bg) var(--bg-opaque), transparent),
+      color-mix(in srgb, var(--page-bg-2) var(--bg-opaque), transparent)),
+    rgba(255, 255, 255, 0.30);
+}
+
 /* 투명 모드에서만 흰 테두리(--border/--border-2) 전부 투명화 → 카드·버튼·입력·구분선 겉선 제거.
    표/달력 격자선(--grid-line)·스크롤바/바 배경(--track)은 별도 변수라 그대로 유지. 불투명 모드는 그대로. */
 :root:not(.app-opaque) { --border: transparent; --border-2: transparent; }
