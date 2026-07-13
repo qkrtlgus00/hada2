@@ -36,6 +36,9 @@ contextBridge.exposeInMainWorld('api', {
     onEnded: (cb) => ipcRenderer.on('youtube:ended', () => cb()),
   },
 
+  /** 트레이 메뉴 → 렌더러 재생 제어 (playpause / next) */
+  onTrayControl: (cb) => ipcRenderer.on('tray:control', (_e, action) => cb(action)),
+
   /** 창 제어 (커스텀 타이틀바 / 투명도 / 블러 / 배율) */
   win: {
     minimize: () => ipcRenderer.invoke('window:minimize'),

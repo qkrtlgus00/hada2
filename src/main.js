@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, Notification, shell, dialog, session, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, Notification, shell, dialog, session, Menu, Tray, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const fsp = fs.promises;
@@ -17,7 +17,7 @@ const DATA_FILE = path.join(app.getPath('userData'), 'data.json');
 // ---- 앱 자체 업데이트 (GitHub raw에서 파일 받아 덮어쓰기) ----
 const UP_OWNER = 'qkrtlgus00';
 const UP_REPO = 'hada2';
-const UP_BRANCH = 'claude/program-recommendations-f6xz4n';
+const UP_BRANCH = 'main'; // 자동 업데이트 기준 = 안정 브랜치(삭제 위험 없음)
 const UP_FILES = ['src/main.js', 'src/preload.js', 'src/renderer.js', 'src/index.html', 'src/styles.css', 'package.json'];
 const UP_BASE = `https://raw.githubusercontent.com/${UP_OWNER}/${UP_REPO}/${UP_BRANCH}/`;
 const APP_ROOT = path.join(__dirname, '..'); // package.json이 있는 폴더
@@ -132,8 +132,8 @@ function startAppServer() {
 // ===== 창 셸 설정 (커스텀 타이틀바 / 투명도 / 블러 / 배율) =====
 // 창 생성 전에 data.json의 prefs에서 창 관련 값만 읽어 옵션에 반영 (시작 시 깜빡임 방지)
 let bootShell = { windowOpacity: 100, backgroundMaterial: 'none', uiScale: 100, theme: 'light' };
-// 런타임 상태 — 투명도와 블러(재질)는 Windows에서 충돌하므로 상호배타로 관리
-let shellState = { windowOpacity: 100, material: 'none' };
+// 런타임 상태 — 투명도는 앱 내부(CSS)에서 처리하므로 여기선 블러 재질만 추적
+let shellState = { material: 'none' };
 
 function clampInt(v, min, max, dflt) {
   const n = Math.round(Number(v));
@@ -157,11 +157,6 @@ function sanitizeShellPrefs(p) {
   };
 }
 function opaqueBgColor() { return bootShell.theme === 'dark' ? '#0f1016' : '#1e1e2e'; }
-// 블러(재질) 활성 중엔 setOpacity가 재질을 깨뜨리므로 불투명(1.0) 고정
-function applyOpacity() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  try { mainWindow.setOpacity(shellState.material !== 'none' ? 1 : shellState.windowOpacity / 100); } catch (_) {}
-}
 
 function createWindow(useFileFallback) {
   const matActive = bootShell.backgroundMaterial !== 'none' && materialSupported();
@@ -173,9 +168,9 @@ function createWindow(useFileFallback) {
     title: '하다 — 할 일 & 메모',
     // OS 타이틀바를 숨기고 앱이 직접 그린 타이틀바 사용 (리사이즈 테두리·스냅은 유지)
     titleBarStyle: 'hidden',
+    // 투명도는 앱 내부(CSS)에서 처리 → 네이티브 opacity 미사용 (블러 재질과 동시 사용 가능)
     backgroundColor: matActive ? '#00000000' : opaqueBgColor(),
     ...(matActive ? { backgroundMaterial: bootShell.backgroundMaterial } : {}),
-    opacity: matActive ? 1 : bootShell.windowOpacity / 100,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -184,7 +179,6 @@ function createWindow(useFileFallback) {
       zoomFactor: bootShell.uiScale / 100, // 화면 배율 (첫 페인트부터 적용)
     },
   });
-  shellState.windowOpacity = bootShell.windowOpacity;
   shellState.material = matActive ? bootShell.backgroundMaterial : 'none';
 
   // 최대화 상태 변화를 렌더러에 알림 (타이틀바 최대화/복원 아이콘 교체)
@@ -210,11 +204,50 @@ function createWindow(useFileFallback) {
   if (useFileFallback) mainWindow.loadFile(path.join(__dirname, 'index.html'));
   else mainWindow.loadURL(`${appBaseUrl}/index.html`);
 
+  // 창 닫기 → 종료 대신 트레이로 숨김(음악 계속). 진짜 종료는 트레이 메뉴/Alt+F4 후 isQuitting.
+  mainWindow.on('close', (e) => {
+    if (!app.isQuitting && tray) {
+      e.preventDefault();
+      mainWindow.hide();
+    }
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
     // 숨은 음악 재생 창이 남아 앱이 안 꺼지는 것 방지
     if (ytWindow && !ytWindow.isDestroyed()) ytWindow.close();
   });
+}
+
+// ===== 트레이 (창 닫아도 상주 + 음악 유지) =====
+let tray = null;
+const TRAY_ICON_B64 = 'iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAhklEQVR4nO3TWwqAMAxE0e7Ihbknt1rxT9C+MjNJiwbyfQ+hTemfymzHnhkbFjZBVPEuhDreRIQCvOJFxDKAa8IvwEBAF7hPOMCKoAIsEPgNoAjJBUYgckALsu4Fpn4DLr8ADdMBljgFYA1TAGgcArD2AfBEvManAHggqnE1oiuugAyHPzUnOSvxWp/58qMAAAAASUVORK5CYII=';
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) { createWindowSafe(); return; }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+function trayControl(action) {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('tray:control', action);
+}
+function createTray() {
+  if (tray) return;
+  let img = nativeImage.createFromDataURL('data:image/png;base64,' + TRAY_ICON_B64);
+  if (process.platform === 'win32') img = img.resize({ width: 16, height: 16 });
+  tray = new Tray(img);
+  tray.setToolTip('하다');
+  const menu = Menu.buildFromTemplate([
+    { label: '열기', click: showMainWindow },
+    { type: 'separator' },
+    { label: '재생 / 일시정지', click: () => trayControl('playpause') },
+    { label: '다음 곡', click: () => trayControl('next') },
+    { type: 'separator' },
+    { label: '종료', click: () => { app.isQuitting = true; app.quit(); } },
+  ]);
+  tray.setContextMenu(menu);
+  tray.on('double-click', showMainWindow);
+  tray.on('click', showMainWindow);
 }
 
 /**
@@ -302,12 +335,8 @@ ipcMain.handle('window:getState', () => ({
   maximized: !!(mainWindow && !mainWindow.isDestroyed() && mainWindow.isMaximized()),
   materialSupported: materialSupported(),
 }));
-ipcMain.handle('window:setOpacity', (_e, pct) => {
-  shellState.windowOpacity = clampInt(pct, 40, 100, 100);
-  applyOpacity();
-  // 블러 활성 중엔 네이티브 투명도 대신 CSS(블러 강도)로 조절하라는 신호
-  return { ok: true, native: shellState.material === 'none' };
-});
+// 투명도는 앱 내부(CSS)로 처리 → 네이티브 opacity 미사용. 호환용 no-op.
+ipcMain.handle('window:setOpacity', () => ({ ok: true, native: false }));
 ipcMain.handle('window:setMaterial', (_e, m) => {
   if (!['none', 'mica', 'acrylic'].includes(m)) return { ok: false, reason: 'BAD_VALUE' };
   if (m !== 'none' && !materialSupported()) return { ok: false, reason: 'UNSUPPORTED' };
@@ -321,7 +350,6 @@ ipcMain.handle('window:setMaterial', (_e, m) => {
       mainWindow.setBackgroundColor('#00000000'); // 투명 페인트 → 재질이 비침
       mainWindow.setBackgroundMaterial(m);
     }
-    applyOpacity();
     return { ok: true };
   } catch (e) {
     // 실패 시 안전한 불투명 상태로 복귀
@@ -415,27 +443,25 @@ function setupYtSession() {
   sess.webRequest.onBeforeRequest({ urls: adHosts }, (_details, cb) => cb({ cancel: true }));
 }
 function ytPlayJs(vol) {
-  // 로드 후: 음량 적용+재생, autonav 끄기, ended→즉시 정지(관련영상 드리프트 방지),
-  // 광고(.ad-showing) 중엔 음소거+스킵 클릭+빨리감기 — 본편 영상은 절대 건드리지 않음.
-  // 광고 음소거는 muted만, 사용자 음량은 volume만 만짐 → 광고가 끝나면 음량 그대로 복원.
+  // 로드 후: 음량 적용+재생, autonav 끄기, ended→즉시 정지. 광고는 스킵 버튼 클릭+빨리감기로 넘김.
+  // 소리 차단(광고/다른 곡)은 메인 프로세스의 setAudioMuted가 담당 → 여기선 v.muted 미사용.
   return "(function(){" +
     "window.__ytvol=" + vol + ";" +
-    "var p0=document.querySelector('.html5-video-player');" +
     "var v=document.querySelector('video');" +
-    "if(v){v.volume=window.__ytvol; v.play&&v.play(); v.addEventListener('ended',function(){try{v.pause();}catch(e){}});" +
-      "if(p0&&p0.classList.contains('ad-showing')){v.muted=true;window.__admuted=true;}else{v.muted=false;window.__admuted=false;}}" +
+    "if(v){v.volume=window.__ytvol; v.play&&v.play(); v.addEventListener('ended',function(){try{v.pause();}catch(e){}});}" +
     "try{var b=document.querySelector('.ytp-autonav-toggle-button[aria-checked=\"true\"]'); if(b){b.click();}}catch(e){}" +
     "if(!window.__adskip){window.__adskip=setInterval(function(){try{" +
+      "var mp=document.querySelector('#movie_player');" +
       "var p=document.querySelector('.html5-video-player');" +
       "var av=p?p.querySelector('video'):document.querySelector('video');" +
       "if(av&&Math.abs(av.volume-window.__ytvol)>0.001){av.volume=window.__ytvol;}" +
-      "if(p&&p.classList.contains('ad-showing')){" +
-        "if(av&&!av.muted){av.muted=true;window.__admuted=true;}" +
-        "var s=p.querySelector('.ytp-ad-skip-button,.ytp-ad-skip-button-modern,.ytp-skip-ad-button,.ytp-ad-skip-button-slot button');" +
+      "var adp=false; try{adp=!!(mp&&mp.getAdState&&mp.getAdState()===1);}catch(e){}" +
+      "if(adp||(p&&p.classList.contains('ad-showing'))){" +
+        "var s=document.querySelector('.ytp-ad-skip-button,.ytp-ad-skip-button-modern,.ytp-skip-ad-button,.ytp-ad-skip-button-slot button,.ytp-ad-skip-button-container button');" +
         "if(s){s.click();}" +
         "if(av&&av.duration&&isFinite(av.duration)){av.currentTime=av.duration;}" +
-      "}else if(window.__admuted){if(av){av.muted=false;}window.__admuted=false;}" +
-    "}catch(e){}},500);}" +
+      "}" +
+    "}catch(e){}},400);}" +
     "})();";
 }
 ipcMain.handle('youtube:play', async (_e, url) => {
@@ -483,12 +509,19 @@ ipcMain.handle('youtube:play', async (_e, url) => {
       ytWindow.webContents.on('did-navigate', onNav);
       ytWindow.webContents.on('did-navigate-in-page', onNav);
     }
+    // 로드 즉시 전체 음소거 → 프리롤/미드롤 광고·엉뚱한 곡 소리 원천 차단.
+    // 폴링이 "지정 영상이 광고 없이 재생 중"임을 확인하면 해제.
+    try { ytWindow.webContents.setAudioMuted(true); } catch (_) {}
     await ytWindow.loadURL(url); // show() 하지 않음 → 백그라운드 오디오
-    startYtPoll(); // 곡 종료 감지 시작 (곡마다 재시작)
+    try { ytWindow.webContents.setAudioMuted(true); } catch (_) {}
+    startYtPoll(); // 상태 폴링 시작 (음소거 제어 + 드리프트/종료 감지)
     return { ok: true };
   } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
 });
-// 곡 종료를 폴링으로 감지 → 렌더러에 알림(다음 곡 재생). 광고 종료 오탐 방지.
+// 250ms 폴링: 플레이어 API로 광고/현재 영상ID/종료를 확인해
+//  ① 광고이거나 지정 영상이 아니면 음소거, 지정 영상이 광고 없이 재생될 때만 소리
+//  ② 오토플레이가 다른 곡을 틀면(드리프트) 즉시 정지+다음 지정곡
+//  ③ 곡 종료 시 정지+다음곡
 let ytPoll = null;
 function stopYtPoll() { if (ytPoll) { clearInterval(ytPoll); ytPoll = null; } }
 function startYtPoll() {
@@ -497,11 +530,30 @@ function startYtPoll() {
     if (!ytWindow || ytWindow.isDestroyed()) { stopYtPoll(); return; }
     try {
       const st = await ytWindow.webContents.executeJavaScript(
-        "(function(){var v=document.querySelector('video');return v?{ended:v.ended,ad:!!document.querySelector('.ad-showing'),d:v.duration}:null;})();"
+        "(function(){" +
+        "var mp=document.querySelector('#movie_player');" +
+        "var v=document.querySelector('video');" +
+        "var ad=false,vid='';" +
+        "try{ad=!!(mp&&mp.getAdState&&mp.getAdState()===1);}catch(e){}" +
+        "try{vid=(mp&&mp.getVideoData&&mp.getVideoData().video_id)||'';}catch(e){}" +
+        "if(!ad){var p=document.querySelector('.html5-video-player');ad=!!(p&&p.classList.contains('ad-showing'));}" +
+        "return {ended:v?v.ended:false,d:v?v.duration:0,ad:ad,vid:vid};" +
+        "})();"
       );
-      if (st && st.ended && !st.ad && st.d > 0) {
+      if (!st) return;
+      const drift = !!(ytExpectedId && st.vid && st.vid !== ytExpectedId);
+      // 지정 영상이 광고 없이 재생될 때만 소리 (기대 ID 없으면 광고만 아니면 허용)
+      const confirmed = ytExpectedId ? (st.vid === ytExpectedId && !st.ad) : !st.ad;
+      try { ytWindow.webContents.setAudioMuted(!confirmed); } catch (_) {}
+      if (drift && !ytEndedSent) {
+        ytEndedSent = true;
         stopYtPoll();
-        // 즉시 정지 — autonav가 관련 영상을 이어 트는 것 방지 (in-page ended 리스너 유실 대비 이중 방어)
+        ytExec("var v=document.querySelector('video'); v&&v.pause();");
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('youtube:ended');
+        return;
+      }
+      if (st.ended && !st.ad && st.d > 0) {
+        stopYtPoll();
         ytExec("var v=document.querySelector('video'); v&&v.pause();");
         if (!ytEndedSent) {
           ytEndedSent = true;
@@ -509,7 +561,7 @@ function startYtPoll() {
         }
       }
     } catch (_) { /* 페이지 전환 중 등은 무시 */ }
-  }, 1500);
+  }, 250);
 }
 function ytExec(js) {
   if (ytWindow && !ytWindow.isDestroyed()) {
@@ -598,11 +650,15 @@ app.whenReady().then(async () => {
     console.error('로컬 서버 시작 실패, file:// 로 폴백:', e);
   }
   createWindowSafe();
+  try { createTray(); } catch (e) { console.error('트레이 생성 실패:', e); }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindowSafe();
+    else showMainWindow();
   });
 });
+
+app.on('before-quit', () => { app.isQuitting = true; });
 
 // 서버가 없으면 file:// 로 폴백해서라도 창을 띄운다
 function createWindowSafe() {
@@ -610,7 +666,8 @@ function createWindowSafe() {
 }
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
+  // 트레이 상주 중엔 창을 닫아도 종료하지 않음(음악 유지). 트레이 없으면 기존 동작.
+  if (process.platform !== 'darwin' && !tray) {
     app.quit();
   }
 });

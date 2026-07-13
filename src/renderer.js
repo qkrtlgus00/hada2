@@ -602,13 +602,18 @@ function applyTheme(theme) {
 // ---- 창 셸 (커스텀 타이틀바 / 투명도 / 블러 / 배율) ----
 let materialOk = false; // 이 OS에서 미카/아크릴 지원 여부 (window:getState로 확인)
 
-// 블러 강도를 CSS 변수로 반영 — 배경/패널이 반투명해져 창 뒤 재질(블러)이 비침
+// 창 투명도·흐림을 CSS 표면 알파로 반영 (앱 내부 방식).
+// 투명도(windowOpacity)는 항상 적용 → 재질 유무와 무관하게 앱이 직접 반투명.
+// 블러 재질이 켜져 있으면 blurIntensity만큼 더 비쳐 창 뒤 재질(블러)이 드러남.
 function applyGlassCss() {
-  const on = prefs.backgroundMaterial !== 'none' && materialOk;
-  const i = on ? prefs.blurIntensity : 0; // 블러 꺼짐 → 완전 불투명 복귀
+  const blurOn = prefs.backgroundMaterial !== 'none' && materialOk;
+  const base = clampInt(prefs.windowOpacity, 40, 100, 100);           // 40~100
+  const extra = blurOn ? clampInt(prefs.blurIntensity, 0, 80, 30) : 0; // 추가 비침
+  const bg = Math.max(base - extra, 30);
+  const surface = Math.max(base - Math.round(extra * 0.6), 45); // 패널은 가독성 위해 덜 비침
   const r = document.documentElement.style;
-  r.setProperty('--bg-opaque', (100 - i) + '%');
-  r.setProperty('--surface-opaque', Math.max(100 - Math.round(i * 0.75), 45) + '%'); // 패널은 가독성 위해 덜 비침
+  r.setProperty('--bg-opaque', bg + '%');
+  r.setProperty('--surface-opaque', surface + '%');
 }
 // 저장된 셸 설정을 네이티브 창에 재적용 (시작 시 main이 적용한 값과 동기화 + 미지원 OS 자가치유)
 async function applyShell() {
@@ -622,19 +627,17 @@ async function applyShell() {
     const r = await window.api.win.setMaterial(prefs.backgroundMaterial).catch(() => null);
     if (!r || !r.ok) prefs.backgroundMaterial = 'none'; // 미지원/실패 → 설정 자가치유
   }
-  window.api.win.setOpacity(prefs.windowOpacity);
   window.api.win.setUiScale(prefs.uiScale);
-  applyGlassCss();
+  applyGlassCss(); // 투명도는 이제 네이티브가 아니라 CSS로 (win.setOpacity 미사용)
 }
 // 설정 모달의 창/화면 컨트롤을 현재 prefs와 동기화
 function syncShellControls() {
-  const blurOn = prefs.backgroundMaterial !== 'none';
   const op = $('#w-opacity'), ov = $('#w-opacity-val'), oh = $('#w-opacity-hint');
-  if (op) { op.value = String(prefs.windowOpacity); op.disabled = blurOn; } // 블러와 상호배타
+  if (op) op.value = String(prefs.windowOpacity); // 투명도·흐림 동시 사용 가능 (비활성화 안 함)
   if (ov) ov.textContent = prefs.windowOpacity + '%';
-  if (oh) oh.hidden = !blurOn;
+  if (oh) oh.hidden = true;
   const gl = $('#w-glass'), gv = $('#w-glass-val');
-  if (gl) { gl.value = String(prefs.blurIntensity); gl.disabled = !blurOn; }
+  if (gl) gl.value = String(prefs.blurIntensity);
   if (gv) gv.textContent = prefs.blurIntensity + '%';
   const sc = $('#w-scale'), sv = $('#w-scale-val');
   if (sc) sc.value = String(prefs.uiScale);
@@ -1071,7 +1074,6 @@ function applyTitle(str) {
   const bt = $('#brand-title'); if (bt) bt.textContent = t;
   const ch = $('#crumb-home'); if (ch) ch.textContent = t;
   const un = $('#user-name'); if (un) un.textContent = t;
-  const av = $('#user-avatar'); if (av) av.textContent = [...t][0] || '하';
   prefs.appTitle = t;
   try { localStorage.setItem('appTitle', t); } catch (_) {}
 }
@@ -1115,21 +1117,62 @@ function renderTodos() {
 
 // ---- 반복 목록 ----
 const RULE_LABEL = { daily: '매일', weekday: '평일', weekly: '매주', monthly: '매월' };
+// 반복 항목의 날짜별 완료맵 (구버전 lastDone 1일 기록을 흡수)
+function recDoneMap(r) {
+  if (!r.done || typeof r.done !== 'object') r.done = r.lastDone ? { [r.lastDone]: true } : {};
+  return r.done;
+}
+function recSyncLastDone(r) { const t = ymd(new Date()); r.lastDone = (r.done && r.done[t]) ? t : ''; }
 function renderRecurring() {
   const list = $('#recurring-list'); if (!list) return;
   list.innerHTML = '';
   const today = ymd(new Date());
   for (const r of recurring) {
-    const doneToday = r.lastDone === today;
+    const map = recDoneMap(r);
+    const doneToday = !!map[today];
     const li = document.createElement('li');
     li.className = 'mini-item' + (doneToday ? ' done' : '');
     const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = doneToday;
-    cb.addEventListener('change', () => { r.lastDone = cb.checked ? today : ''; scheduleSave(); renderRecurring(); });
-    const sp = document.createElement('span'); sp.className = 'mini-item-text'; sp.textContent = r.title;
+    cb.addEventListener('change', () => { if (cb.checked) map[today] = true; else delete map[today]; recSyncLastDone(r); scheduleSave(); renderRecurring(); });
+    const sp = document.createElement('span'); sp.className = 'mini-item-text rec-open'; sp.textContent = r.title; sp.title = '날짜별 완료 기록 열기';
+    sp.addEventListener('click', () => openRecurringModal(r.id));
     const tag = document.createElement('em'); tag.className = 'mini-tag'; tag.textContent = RULE_LABEL[r.rule] || r.rule;
     const del = document.createElement('button'); del.className = 'mini-del'; del.textContent = '×';
     del.addEventListener('click', () => { recurring = recurring.filter((x) => x.id !== r.id); scheduleSave(); renderRecurring(); });
     li.append(cb, sp, tag, del); list.appendChild(li);
+  }
+}
+// ---- 반복 항목 날짜 달력 모달 ----
+let recModalId = null;
+let recMonth = new Date();
+function openRecurringModal(id) {
+  const r = recurring.find((x) => x.id === id);
+  if (!r) return;
+  recModalId = id;
+  recMonth = new Date();
+  const t = $('#rec-modal-title'); if (t) t.textContent = r.title || '반복 항목';
+  renderRecGrid();
+  $('#recurring-modal').hidden = false;
+}
+function closeRecurringModal() { $('#recurring-modal').hidden = true; recModalId = null; renderRecurring(); }
+function renderRecGrid() {
+  const r = recurring.find((x) => x.id === recModalId); if (!r) return;
+  const map = recDoneMap(r);
+  const grid = $('#rec-grid'); if (!grid) return;
+  const y = recMonth.getFullYear(), m = recMonth.getMonth();
+  const lbl = $('#rec-label'); if (lbl) lbl.textContent = `${y}년 ${m + 1}월`;
+  grid.innerHTML = '';
+  const today = ymd(new Date());
+  for (const c of monthGrid(y, m)) {
+    const cellYmd = `${c.y}-${String(c.m + 1).padStart(2, '0')}-${String(c.d).padStart(2, '0')}`;
+    const b = document.createElement('button');
+    b.className = 'mini-day' + (c.inMonth ? '' : ' out') + (cellYmd === today ? ' today' : '') + (map[cellYmd] ? ' rec-on' : '');
+    b.textContent = c.d;
+    b.addEventListener('click', () => {
+      if (map[cellYmd]) delete map[cellYmd]; else map[cellYmd] = true;
+      recSyncLastDone(r); scheduleSave(); renderRecGrid();
+    });
+    grid.appendChild(b);
   }
 }
 
@@ -1195,7 +1238,7 @@ function renderHome() {
     { ic: 'check', label: '남은 할일', value: `${activeTodos}개`, view: 'calendar' },
     { ic: 'clock', label: '다가오는 마감', value: upcoming.length ? `${upcoming[0].title} · ${ddayLabel(daysUntil(upcoming[0].due, today))}` : '없음', view: 'deadlines' },
     { ic: 'wallet', label: '이번 달 지출', value: formatWon(led.expense), view: 'ledger' },
-    { ic: 'users', label: '진행중 작업', value: works.filter((w) => w.status === '진행중').length + '건', view: 'deadlines' },
+    { ic: 'check', label: '진행중 작업', value: works.filter((w) => w.status === '진행중').length + '건', view: 'deadlines' },
     { ic: 'check', label: '오늘 습관', value: habits.length ? `${habitsToday}/${habits.length}` : '없음', view: 'habits' },
   ];
   grid.innerHTML = '';
@@ -1308,6 +1351,9 @@ function renderWorks() {
     range.addEventListener('input', () => { it.progress = Number(range.value); fill.style.width = it.progress + '%'; pctLabel.textContent = it.progress + '%'; scheduleSave(); });
     prog.append(bar, range, pctLabel);
     body.append(title, sub, prog);
+    // 제목/정보줄 클릭 → 편집 모달 (진행률 슬라이더 영역은 제외)
+    body.classList.add('dl-clickable');
+    body.addEventListener('click', (e) => { if (e.target.closest('.dl-progress')) return; openWorkModal(it.id); });
 
     // 상태 셀렉트 (완료 체크 대체)
     const sel = document.createElement('select'); sel.className = 'mini-select dl-status';
@@ -1321,6 +1367,49 @@ function renderWorks() {
     list.appendChild(row);
   }
   filterCurrentRows();
+}
+
+// ---- 작업 항목 편집 모달 (메모 포함 전체 필드) ----
+let editingWorkId = null;
+function openWorkModal(id) {
+  const w = works.find((x) => x.id === id);
+  if (!w) return;
+  editingWorkId = id;
+  $('#w-title').value = w.title || '';
+  $('#w-client').value = w.client || '';
+  $('#w-contact').value = w.contact || '';
+  $('#w-platform').value = w.platform || '';
+  $('#w-type').value = w.type || '';
+  $('#w-amount').value = w.amount ? String(w.amount) : '';
+  $('#w-status').value = WORK_STATUS.includes(w.status) ? w.status : '대기';
+  $('#w-due').value = w.due || '';
+  $('#w-notes').value = w.notes || '';
+  $('#work-modal').hidden = false;
+  setTimeout(() => $('#w-title').focus(), 30);
+}
+function closeWorkModal() { $('#work-modal').hidden = true; editingWorkId = null; }
+function saveWorkModal() {
+  const w = works.find((x) => x.id === editingWorkId);
+  if (!w) { closeWorkModal(); return; }
+  const title = $('#w-title').value.trim(); const due = $('#w-due').value;
+  if (!title || !due) { toast('제목과 마감일을 입력하세요.'); return; }
+  const status = $('#w-status').value;
+  Object.assign(w, {
+    title, due, status, done: status === '완료',
+    client: $('#w-client').value.trim(),
+    contact: $('#w-contact').value.trim(),
+    platform: $('#w-platform').value.trim(),
+    type: $('#w-type').value.trim(),
+    amount: Number($('#w-amount').value) || 0,
+    notes: $('#w-notes').value.trim(),
+  });
+  scheduleSave(); renderWorks(); closeWorkModal();
+}
+function deleteWorkModal() {
+  if (editingWorkId && confirm('이 작업을 삭제할까요?')) {
+    works = works.filter((x) => x.id !== editingWorkId);
+    scheduleSave(); renderWorks(); closeWorkModal();
+  }
 }
 
 // ---- 메모 (서식 툴바 + contenteditable) ----
@@ -1710,10 +1799,27 @@ function bindUI() {
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (!$('#modal').hidden) closeModal();
+    else if ($('#work-modal') && !$('#work-modal').hidden) closeWorkModal();
+    else if ($('#recurring-modal') && !$('#recurring-modal').hidden) closeRecurringModal();
     else if (!$('#settings-modal').hidden) closeSettingsModal();
     else if (!$('#banner-modal').hidden) closeBannerModal();
     else if ($('#note-modal') && !$('#note-modal').hidden) closeNoteModal();
   });
+
+  // 작업 편집 모달
+  const workForm = $('#work-form');
+  if (workForm) workForm.addEventListener('submit', (e) => { e.preventDefault(); saveWorkModal(); });
+  const wc = $('#work-close'); if (wc) wc.addEventListener('click', closeWorkModal);
+  const wcn = $('#work-cancel'); if (wcn) wcn.addEventListener('click', closeWorkModal);
+  const wd = $('#work-del'); if (wd) wd.addEventListener('click', deleteWorkModal);
+  const wm = $('#work-modal'); if (wm) wm.addEventListener('click', (e) => { if (e.target === wm) closeWorkModal(); });
+
+  // 반복 항목 날짜 달력 모달
+  const rc = $('#rec-close'); if (rc) rc.addEventListener('click', closeRecurringModal);
+  const rdn = $('#rec-done'); if (rdn) rdn.addEventListener('click', closeRecurringModal);
+  const rm = $('#recurring-modal'); if (rm) rm.addEventListener('click', (e) => { if (e.target === rm) closeRecurringModal(); });
+  const rp = $('#rec-prev'); if (rp) rp.addEventListener('click', () => { recMonth = new Date(recMonth.getFullYear(), recMonth.getMonth() - 1, 1); renderRecGrid(); });
+  const rn = $('#rec-next'); if (rn) rn.addEventListener('click', () => { recMonth = new Date(recMonth.getFullYear(), recMonth.getMonth() + 1, 1); renderRecGrid(); });
 
   $('#add-event-btn').addEventListener('click', () => openModal(null));
   $('#prev-week').addEventListener('click', () => { weekStart = addDays(weekStart, -7); render(); });
@@ -1752,12 +1858,12 @@ function bindUI() {
   const upBtn = $('#update-check'); if (upBtn) upBtn.addEventListener('click', manualUpdateCheck);
   renderPresets();
 
-  // 창 / 화면 설정 (투명도·블러·배율)
+  // 창 / 화면 설정 (투명도·블러·배율) — 투명도는 앱 내부(CSS) 방식이라 블러와 동시 사용 가능
   const wOp = $('#w-opacity');
   if (wOp) wOp.addEventListener('input', () => {
     prefs.windowOpacity = Number(wOp.value);
     const ov = $('#w-opacity-val'); if (ov) ov.textContent = prefs.windowOpacity + '%';
-    if (window.api.win) window.api.win.setOpacity(prefs.windowOpacity);
+    applyGlassCss();
     scheduleSave();
   });
   const wMat = $('#w-material');
@@ -1878,6 +1984,11 @@ function bindUI() {
   });
   // 곡 끝나면 목록 다음 곡 자동 재생
   if (window.api.youtube && window.api.youtube.onEnded) window.api.youtube.onEnded(playNext);
+  // 트레이 메뉴 재생 제어
+  if (window.api.onTrayControl) window.api.onTrayControl((action) => {
+    if (action === 'playpause') ytToggle();
+    else if (action === 'next') playNext();
+  });
 
   // 꾹 눌러 드래그로 순서 바꾸기
   enableReorder($('#yt-list'), '.yt-row', (ids) => { playlist = reorderByIds(playlist, ids); scheduleSave(); renderYouTube(); });

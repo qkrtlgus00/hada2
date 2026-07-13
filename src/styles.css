@@ -266,23 +266,17 @@ body.is-max #tb-max .i-restore { display: block; }
 /* 사용자 칩 (이름 + 아바타) */
 .user-chip {
   display: flex; align-items: center; gap: 8px;
-  padding: 4px 6px 4px 12px;
+  padding: 7px 14px;
   border: 1px solid var(--border-2);
   border-radius: 999px;
   background: var(--panel);
   color: var(--text);
   cursor: pointer;
-  font-family: inherit; font-size: 13px;
+  font-family: inherit; font-size: 13px; font-weight: 600;
   transition: background .12s;
 }
 .user-chip:hover { background: var(--panel-2); }
-.user-chip .user-name { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.avatar-sm {
-  width: 28px; height: 28px; border-radius: 50%;
-  background: var(--primary); color: #fff;
-  display: grid; place-items: center;
-  font-weight: 700; font-size: 13px; flex: 0 0 auto;
-}
+.user-chip .user-name { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .icon-btn {
   width: 38px; height: 38px;
@@ -734,6 +728,7 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
 .mini-day.out { color: var(--text-mute); opacity: .5; }
 .mini-day.in-week { background: var(--panel); }
 .mini-day.today { background: var(--accent); color: var(--accent-text); font-weight: 700; }
+.mini-day.rec-on { background: var(--success); color: #fff; font-weight: 700; }
 
 /* 미니 입력/목록 */
 .mini-add { display: flex; gap: 6px; margin-bottom: 8px; }
@@ -864,6 +859,15 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
 .dl-bar-fill { height: 100%; background: var(--accent); border-radius: 999px; transition: width .1s; }
 .dl-progress input[type="range"] { width: 96px; accent-color: var(--primary); flex: 0 0 auto; }
 .dl-pct { font-size: 11px; color: var(--text-dim); width: 36px; text-align: right; flex: 0 0 auto; }
+/* 작업 카드: 제목/정보줄 클릭 → 편집 모달 */
+.dl-body.dl-clickable { cursor: pointer; }
+.dl-body.dl-clickable .dl-progress { cursor: default; }
+.dl-body.dl-clickable:hover .dl-title { text-decoration: underline; }
+/* 반복 항목 제목 클릭 (날짜 달력) */
+.mini-item-text.rec-open { cursor: pointer; }
+.mini-item-text.rec-open:hover { text-decoration: underline; }
+/* 모달 본문 안내문 */
+.modal-body > .hint { font-size: 12.5px; color: var(--text-dim); margin: 0 0 4px; }
 
 /* ===== 유튜브 플레이어 ===== */
 /* 재생 중 바 (백그라운드 오디오) */
