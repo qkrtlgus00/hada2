@@ -132,6 +132,7 @@ body.is-max #tb-max .i-restore { display: block; }
 
 /* ===== 앱 셸 ===== */
 .app {
+  position: relative; /* 스티커 레이어(창 전체=사이드바+본문)의 위치 기준 */
   display: flex;
   height: calc(100vh - var(--titlebar-h)); /* 타이틀바가 상단 여백을 대체 */
   padding: 0 14px 14px;
