@@ -658,8 +658,10 @@ function applyGlassCss() {
   if (prefs.backgroundMaterial === 'frost') {
     root.classList.add('glass-frost');
     const op = clampInt(prefs.windowOpacity, 15, 100, 100);
-    r.setProperty('--bg-opaque', Math.max(Math.round(op * 0.5), 32) + '%');      // 밀키 하한 32%
-    r.setProperty('--surface-opaque', Math.max(Math.round(op * 0.7), 50) + '%'); // 표면 하한 50%
+    const fog = clampInt(prefs.blurIntensity, 0, 100, 30); // 흐림(프로스트) 강도 = '블러 강도' 슬라이더
+    r.setProperty('--bg-opaque', Math.max(Math.round(op * 0.5), 30) + '%');      // 밀키 베이스
+    r.setProperty('--surface-opaque', Math.max(Math.round(op * 0.7), 55) + '%'); // 표면
+    r.setProperty('--frost-veil', (18 + Math.round(fog * 0.5)) + '%');           // 18~68% 흰 막(흐림 강도)
     r.setProperty('--glass-blur', '0px');
     return;
   }
@@ -2125,7 +2127,8 @@ async function importData() {
     // 가져온 설정 정규화 (범위 밖 값 방지)
     prefs.ytVolume = clampInt(prefs.ytVolume, 0, 100, 100);
     prefs.windowOpacity = clampInt(prefs.windowOpacity, 15, 100, 100);
-    prefs.backgroundMaterial = ['none', 'frost', 'mica', 'acrylic'].includes(prefs.backgroundMaterial) ? prefs.backgroundMaterial : 'none';
+    if (prefs.backgroundMaterial === 'acrylic') prefs.backgroundMaterial = 'frost'; // 아크릴 제거 → 뿌연으로 전환
+    prefs.backgroundMaterial = ['none', 'frost', 'mica'].includes(prefs.backgroundMaterial) ? prefs.backgroundMaterial : 'none';
     prefs.blurIntensity = clampInt(prefs.blurIntensity, 0, 100, 30);
     prefs.uiScale = clampInt(prefs.uiScale, 80, 150, 100);
     prefs.windowTransparent = (typeof prefs.windowTransparent === 'boolean') ? prefs.windowTransparent : false;
@@ -2541,7 +2544,8 @@ async function init() {
   prefs.sidebarCollapsed = (typeof p.sidebarCollapsed === 'boolean') ? p.sidebarCollapsed : (lsGet('sidebarCollapsed', '0') === '1');
   prefs.ytVolume = clampInt(p.ytVolume, 0, 100, 100);
   prefs.windowOpacity = clampInt(p.windowOpacity, 15, 100, 100);
-  prefs.backgroundMaterial = ['none', 'frost', 'mica', 'acrylic'].includes(p.backgroundMaterial) ? p.backgroundMaterial : 'none';
+  const _bm = (p.backgroundMaterial === 'acrylic') ? 'frost' : p.backgroundMaterial; // 아크릴 제거 → 뿌연
+  prefs.backgroundMaterial = ['none', 'frost', 'mica'].includes(_bm) ? _bm : 'none';
   prefs.blurIntensity = clampInt(p.blurIntensity, 0, 100, 30);
   prefs.uiScale = clampInt(p.uiScale, 80, 150, 100);
   prefs.windowTransparent = (typeof p.windowTransparent === 'boolean') ? p.windowTransparent : false;
