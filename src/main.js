@@ -15,9 +15,11 @@ app.setName('hada2');
 // 숨은 창에서 유튜브 오디오를 자동재생하려면 사용자 제스처 요구를 꺼야 함
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
-// 투명(frameless transparent) 창이 잠깐씩 불투명해졌다 창을 움직이면 돌아오는 깜빡임(DWM/GPU 합성 경쟁) 방지.
-// GPU 래스터라이즈는 유지하고 레이어 합성만 CPU로 → 투명도 안정화.
-app.commandLine.appendSwitch('disable-gpu-compositing');
+// 투명(frameless transparent) 창이 잠깐씩 불투명해졌다 창을 움직이면 돌아오는 깜빡임 방지.
+// 원인: Windows '창 가림 판정'(occlusion)이 창을 가려졌다고 오판 → 렌더링을 멈춰 투명이 순간 사라짐.
+// 그 판정 기능만 끔. GPU 합성은 그대로라 투명도는 정상 유지.
+// (v1.13.6의 disable-gpu-compositing은 투명도를 아예 깨뜨려서 v1.13.7에서 제거함.)
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 
 // 데이터 파일 경로: OS별 사용자 데이터 폴더 안에 저장
 const DATA_FILE = path.join(app.getPath('userData'), 'data.json');
