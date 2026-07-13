@@ -318,6 +318,23 @@ function centerOnPrimary() {
 function trayControl(action) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('tray:control', action);
 }
+// 설치본에서만 유효한 electron-updater 참조 (트레이의 수동 '업데이트 확인'용)
+let autoUpdaterRef = null;
+function checkForUpdatesManual() {
+  if (!app.isPackaged) {
+    dialog.showMessageBox({ type: 'info', title: '하다', message: '개발(폴더) 실행에서는 자동 업데이트를 쓰지 않아요.', detail: '설치본에서만 GitHub 릴리스로 업데이트됩니다.' });
+    return;
+  }
+  if (!autoUpdaterRef) return;
+  const au = autoUpdaterRef;
+  function cleanup() { au.removeListener('update-not-available', onNone); au.removeListener('error', onErr); }
+  const onNone = () => { cleanup(); dialog.showMessageBox({ type: 'info', title: '하다 업데이트', message: '이미 최신 버전이에요.' }); };
+  const onErr = (e) => { cleanup(); dialog.showMessageBox({ type: 'warning', title: '하다 업데이트', message: '업데이트 확인에 실패했어요.', detail: String((e && e.message) || e) }); };
+  au.once('update-not-available', onNone);
+  au.once('error', onErr);
+  // 업데이트가 있으면 autoDownload가 받아서 'update-downloaded' → 재시작 안내창으로 이어짐
+  au.checkForUpdates().catch(() => {});
+}
 function createTray() {
   if (tray) return;
   let img = nativeImage.createFromDataURL('data:image/png;base64,' + TRAY_ICON_B64);
@@ -331,6 +348,7 @@ function createTray() {
     { label: '재생 / 일시정지', click: () => trayControl('playpause') },
     { label: '다음 곡', click: () => trayControl('next') },
     { type: 'separator' },
+    { label: '업데이트 확인', click: checkForUpdatesManual },
     { label: '종료', click: () => { app.isQuitting = true; app.quit(); } },
   ]);
   tray.setContextMenu(menu);
@@ -724,11 +742,31 @@ app.whenReady().then(async () => {
   if (app.isPackaged) {
     try {
       const { autoUpdater } = require('electron-updater');
+      autoUpdaterRef = autoUpdater; // 트레이 수동 확인용
       autoUpdater.autoDownload = true;
-      autoUpdater.on('update-downloaded', () => {
-        try { new Notification({ title: '하다 업데이트', body: '새 버전을 받았어요. 앱을 다시 켜면 적용됩니다.' }).show(); } catch (_) {}
+      autoUpdater.autoInstallOnAppQuit = true; // 완전 종료 시에도 적용(백업 경로)
+      autoUpdater.on('update-downloaded', (info) => {
+        // 트레이 상주 앱은 창을 닫아도 프로세스가 살아 있어 autoInstallOnAppQuit이 잘 안 걸린다.
+        // (사용자는 창만 닫고 다시 열어 같은 프로세스를 포커스 → 앱이 한 번도 진짜 종료되지 않음)
+        // 다운로드가 끝나면 바로 재시작·적용을 물어봐 확실히 새 버전으로 올린다.
+        const v = (info && info.version) ? ' v' + info.version : '';
+        dialog.showMessageBox({
+          type: 'info',
+          buttons: ['지금 재시작', '나중에'],
+          defaultId: 0,
+          cancelId: 1,
+          noLink: true,
+          title: '하다 업데이트',
+          message: '새 버전' + v + '을 받았어요.',
+          detail: '지금 재시작하면 바로 적용됩니다. "나중에"를 눌러도 앱을 완전히 종료(트레이 → 종료)하면 자동으로 적용돼요.',
+        }).then((r) => {
+          if (r.response === 0) {
+            app.isQuitting = true;
+            setImmediate(() => { try { autoUpdater.quitAndInstall(true, true); } catch (_) {} });
+          }
+        }).catch(() => {});
       });
-      autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+      autoUpdater.checkForUpdates().catch((e) => console.error('업데이트 확인 실패:', e));
     } catch (e) { console.error('자동 업데이트 초기화 실패:', e); }
   }
 
