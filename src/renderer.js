@@ -2251,6 +2251,8 @@ function bindUI() {
     }
     prefs.backgroundMaterial = b.dataset.m;
     applyGlassCss(); syncShellControls(); scheduleSave();
+    // 투명/비투명 창을 바꿔야 하는 전환(없음↔재질)은 창을 다시 만들어야 완전 적용됨
+    if (r.needsRestart) toast('배경 블러는 앱을 다시 켜면 완전히 적용돼요.');
   }));
   const wGl = $('#w-glass');
   if (wGl) wGl.addEventListener('input', () => {
