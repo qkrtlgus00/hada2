@@ -28,10 +28,10 @@ let events = [];
 let todos = [];       // [{id,title,done,createdAt}]
 let recurring = [];   // [{id,title,rule,lastDone}]
 let ledger = [];      // [{id,date,type,amount,category,memo}]
-let deadlines = [];   // [{id,title,due,notes,done}]
+// 작업 관리(마감·커미션·외주 통합): [{id,title,client,contact,platform,type,amount,status,done,due,progress,notes}]
+let works = [];
 let notes = [];       // [{id,text,updatedAt}]
 let habits = [];      // [{id,name,log:{ymd:true}}]
-let commissions = []; // [{id,name,contact,type,price,status,due,memo}]
 let playlist = [];    // [{id,title,url,videoId,listId}]
 let banner = '';      // 홈 배너 dataURL
 let bannerCfg = { height: 180, zoom: 100 }; // 배너 높이(px)·줌(%)
@@ -40,14 +40,14 @@ let ytCurrent = null; // 현재 재생 중 트랙 id
 let ytPlaying = false; // 백그라운드 오디오 재생 상태
 let ledgerType = 'expense'; // 가계부 입력 구분
 let currentView = 'calendar';
-let deadlineMonth = ''; // 마감 월 필터 ('' = 전체)
+let deadlineMonth = ''; // 작업 월 필터 ('' = 전체)
 // UI 설정(테마/색/제목/사이드바접힘/음량/창 셸/알림) — data.json에 저장(origin 무관 영구)
 let prefs = {
   theme: 'light', colors: {}, viewColors: {}, appTitle: '하다', sidebarCollapsed: false,
   ytRepeat: 'off', ytVolume: 100,
   windowOpacity: 100, backgroundMaterial: 'none', blurIntensity: 30, uiScale: 100,
   notifyDeadlines: true,
-  manual: { ledger: false, deadlines: false, commissions: false },
+  manual: { ledger: false, works: false },
 };
 let miniMonth = new Date(); // 미니 달력이 보는 달
 let weekStart = startOfWeek(new Date()); // 현재 보는 주의 월요일
@@ -209,15 +209,34 @@ function icon(name) {
   return `<svg class="ic-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
 }
 
-// 구버전 마감 항목 → 확장 스키마 (done→status, 필드 보강)
-function migrateDeadline(d) {
-  const status = d.status || (d.done ? '완료' : '대기');
+// 작업 항목 정규화 (순수). 구버전 마감(deadline)·커미션(commission)·이미 병합된 항목 모두 흡수.
+// 커미션의 name→title, price→amount, memo→notes, 상태 '진행'→'진행중'으로 통일.
+function migrateWork(w) {
+  const r = w || {};
+  const rawStatus = r.status === '진행' ? '진행중' : r.status;
+  const status = rawStatus || (r.done ? '완료' : '대기');
   return {
-    progress: 0, client: '', platform: '', amount: 0,
-    ...d,
+    id: r.id || (typeof crypto !== 'undefined' ? crypto.randomUUID() : String(Math.random())),
+    title: (r.title || r.name || '').trim() || '(제목 없음)',
+    client: r.client || '',
+    contact: r.contact || '',
+    platform: r.platform || '',
+    type: r.type || '',
+    amount: Number(r.amount != null ? r.amount : r.price) || 0,
     status,
     done: status === '완료',
+    due: r.due || '',
+    progress: Math.max(0, Math.min(100, Number(r.progress) || 0)),
+    notes: (r.notes != null ? r.notes : r.memo) || '',
   };
+}
+// data(또는 백업)에서 작업 목록을 만든다. 신형 works 우선, 없으면 구형 deadlines+commissions 1회 병합.
+function loadWorks(data) {
+  const d = data || {};
+  if (Array.isArray(d.works)) return d.works.map(migrateWork);
+  const dl = Array.isArray(d.deadlines) ? d.deadlines : [];
+  const cm = Array.isArray(d.commissions) ? d.commissions : [];
+  return [...dl, ...cm].map(migrateWork);
 }
 
 // 평문 텍스트 → 안전한 HTML (escape + 줄바꿈)
@@ -373,7 +392,7 @@ function scheduleSave() {
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
     saveTimer = null;
-    try { await window.api.save({ events, todos, recurring, ledger, deadlines, notes, habits, commissions, playlist, banner, bannerCfg, stickers, prefs, firedReminders }); }
+    try { await window.api.save({ events, todos, recurring, ledger, works, notes, habits, playlist, banner, bannerCfg, stickers, prefs, firedReminders }); }
     catch (err) { console.error('저장 실패:', err); }
   }, 250);
 }
@@ -720,13 +739,13 @@ function toast(msg) {
 // 탭(뷰)마다 고유 색 — 활성 탭과 그 페이지 상단이 같은 색으로 켜져 "연결된" 느낌
 const VIEW_COLORS = {
   home: '#5b6cff', calendar: '#2f9e6b', ledger: '#e08a1e', deadlines: '#e5484d',
-  commissions: '#8b5cf6', notes: '#0ea5a4', youtube: '#e5487f',
+  notes: '#0ea5a4', youtube: '#e5487f',
 };
 // 설정에서 뷰 색을 노출할 항목 (라벨)
 const VIEW_META = [
   { view: 'home', label: '홈' }, { view: 'calendar', label: '일정' },
-  { view: 'ledger', label: '가계부' }, { view: 'deadlines', label: '마감' },
-  { view: 'commissions', label: '커미션·외주' }, { view: 'notes', label: '메모' },
+  { view: 'ledger', label: '가계부' }, { view: 'deadlines', label: '작업 관리' },
+  { view: 'notes', label: '메모' },
   { view: 'youtube', label: '음악' },
 ];
 // 뷰 강조색: 사용자 지정(prefs.viewColors) 우선, 없으면 기본 VIEW_COLORS
@@ -744,7 +763,7 @@ function setView(view) {
   renderStickers();
 }
 // 상단 검색: 현재 화면 목록을 질의어로 필터 (캘린더는 render()가 searchText를 이미 반영)
-const SEARCH_ROW_SEL = '.ledger-row, .deadline-row, .comm-row, .note-card, .yt-row';
+const SEARCH_ROW_SEL = '.ledger-row, .deadline-row, .note-card, .yt-row';
 function filterCurrentRows() {
   const q = (searchText || '').trim().toLowerCase();
   const section = document.querySelector(`[data-view="${currentView}"]`);
@@ -764,10 +783,9 @@ function showView(name) {
   if (name === 'home') renderHome();
   else if (name === 'calendar') render();
   else if (name === 'ledger') renderLedger();
-  else if (name === 'deadlines') renderDeadlines();
+  else if (name === 'deadlines') renderWorks();
   else if (name === 'notes') renderNotes();
   else if (name === 'habits') renderHabits();
-  else if (name === 'commissions') renderCommissions();
   else if (name === 'youtube') renderYouTube();
 }
 function showCalendar() { setView('calendar'); }
@@ -796,7 +814,7 @@ function notifyToday() {
 function checkReminders() {
   const now = Date.now();
   let changed = false;
-  for (const h of dueReminders(events, deadlines, firedReminders, now, prefs.notifyDeadlines !== false)) {
+  for (const h of dueReminders(events, works, firedReminders, now, prefs.notifyDeadlines !== false)) {
     firedReminders[h.key] = now;
     changed = true;
     if (!h.silent && window.api && window.api.notify) window.api.notify(h.title, h.body);
@@ -1169,7 +1187,7 @@ function renderHome() {
   const ym = monthKey(today);
   const todayEvents = events.filter((e) => e.date === today).length;
   const activeTodos = todos.filter((t) => !t.done).length;
-  const upcoming = deadlines.filter((d) => d.status !== '완료' && d.due).sort((a, b) => a.due.localeCompare(b.due));
+  const upcoming = works.filter((d) => d.status !== '완료' && d.due).sort((a, b) => a.due.localeCompare(b.due));
   const led = sumLedger(ledger, ym);
   const habitsToday = habits.filter((h) => h.log && h.log[today]).length;
   const cards = [
@@ -1177,7 +1195,7 @@ function renderHome() {
     { ic: 'check', label: '남은 할일', value: `${activeTodos}개`, view: 'calendar' },
     { ic: 'clock', label: '다가오는 마감', value: upcoming.length ? `${upcoming[0].title} · ${ddayLabel(daysUntil(upcoming[0].due, today))}` : '없음', view: 'deadlines' },
     { ic: 'wallet', label: '이번 달 지출', value: formatWon(led.expense), view: 'ledger' },
-    { ic: 'users', label: '진행 커미션', value: commissions.filter((c) => c.status === '진행').length + '건', view: 'commissions' },
+    { ic: 'users', label: '진행중 작업', value: works.filter((w) => w.status === '진행중').length + '건', view: 'deadlines' },
     { ic: 'check', label: '오늘 습관', value: habits.length ? `${habitsToday}/${habits.length}` : '없음', view: 'habits' },
   ];
   grid.innerHTML = '';
@@ -1226,33 +1244,35 @@ function renderLedger() {
   filterCurrentRows();
 }
 
-// ---- 마감 추적 ----
-const DL_STATUS = ['대기', '진행중', '완료'];
-const DL_ORDER = { 대기: 0, 진행중: 1, 완료: 2 };
-function renderDeadlines() {
+// ---- 작업 관리 (마감·커미션·외주 통합) ----
+const WORK_STATUS = ['대기', '진행중', '완료'];
+const WORK_ORDER = { 대기: 0, 진행중: 1, 완료: 2 };
+function renderWorks() {
   const list = $('#deadline-list'); if (!list) return;
   const today = ymd(new Date());
   const monthEl = $('#deadline-month');
   if (monthEl && monthEl.value !== deadlineMonth) monthEl.value = deadlineMonth;
 
   // 월 필터 적용 (deadlineMonth '' = 전체)
-  const scope = deadlineMonth ? deadlines.filter((d) => monthKey(d.due) === deadlineMonth) : deadlines;
+  const scope = deadlineMonth ? works.filter((d) => monthKey(d.due) === deadlineMonth) : works;
 
-  // 상단 금액 합계 (필터 범위 기준)
+  // 상단 요약: 상태별 건수 + 금액 합계 (필터 범위 기준)
+  const cnt = (st) => scope.filter((d) => d.status === st).length;
   const totalAll = scope.reduce((s, d) => s + (Number(d.amount) || 0), 0);
   const totalOpen = scope.filter((d) => d.status !== '완료').reduce((s, d) => s + (Number(d.amount) || 0), 0);
-  const totalDone = scope.filter((d) => d.status === '완료').reduce((s, d) => s + (Number(d.amount) || 0), 0);
   const sum = $('#deadline-summary');
   if (sum) {
     const label = deadlineMonth ? deadlineMonth.replace('-', '년 ') + '월' : '전체';
     sum.innerHTML =
+      `<div class="lsum"><span>대기</span><strong>${cnt('대기')}건</strong></div>` +
+      `<div class="lsum"><span>진행중</span><strong>${cnt('진행중')}건</strong></div>` +
+      `<div class="lsum income"><span>완료</span><strong>${cnt('완료')}건</strong></div>` +
       `<div class="lsum"><span>${label} 금액</span><strong>${formatWon(totalAll)}</strong></div>` +
-      `<div class="lsum"><span>미완료 금액</span><strong>${formatWon(totalOpen)}</strong></div>` +
-      `<div class="lsum income"><span>완료 금액</span><strong>${formatWon(totalDone)}</strong></div>`;
+      `<div class="lsum"><span>미완료 금액</span><strong>${formatWon(totalOpen)}</strong></div>`;
   }
 
-  const items = prefs.manual.deadlines ? [...scope] : [...scope].sort((a, b) =>
-    (DL_ORDER[a.status] - DL_ORDER[b.status]) || String(a.due || '').localeCompare(String(b.due || '')));
+  const items = prefs.manual.works ? [...scope] : [...scope].sort((a, b) =>
+    (WORK_ORDER[a.status] - WORK_ORDER[b.status]) || String(a.due || '').localeCompare(String(b.due || '')));
   list.innerHTML = '';
   if (!items.length) { list.innerHTML = '<div class="empty-hint">등록된 작업이 없어요.</div>'; return; }
 
@@ -1269,7 +1289,9 @@ function renderDeadlines() {
     const title = document.createElement('div'); title.className = 'dl-title'; title.textContent = it.title;
     const metaBits = [];
     if (it.client) metaBits.push(it.client);
+    if (it.contact) metaBits.push(it.contact);
     if (it.platform) metaBits.push(it.platform);
+    if (it.type) metaBits.push(it.type);
     if (it.amount) metaBits.push(formatWon(it.amount));
     if (it.due) metaBits.push(it.due);
     if (it.notes) metaBits.push(it.notes);
@@ -1289,12 +1311,12 @@ function renderDeadlines() {
 
     // 상태 셀렉트 (완료 체크 대체)
     const sel = document.createElement('select'); sel.className = 'mini-select dl-status';
-    for (const st of DL_STATUS) { const o = document.createElement('option'); o.value = st; o.textContent = st; if (it.status === st) o.selected = true; sel.appendChild(o); }
-    sel.addEventListener('change', () => { it.status = sel.value; it.done = sel.value === '완료'; scheduleSave(); renderDeadlines(); });
+    for (const st of WORK_STATUS) { const o = document.createElement('option'); o.value = st; o.textContent = st; if (it.status === st) o.selected = true; sel.appendChild(o); }
+    sel.addEventListener('change', () => { it.status = sel.value; it.done = sel.value === '완료'; scheduleSave(); renderWorks(); });
 
     const badge = document.createElement('span'); badge.className = 'dl-badge ' + cls; badge.textContent = doneStatus ? '완료' : (n === null ? '' : ddayLabel(n));
     const del = document.createElement('button'); del.className = 'mini-del'; del.textContent = '×';
-    del.addEventListener('click', () => { deadlines = deadlines.filter((x) => x.id !== it.id); scheduleSave(); renderDeadlines(); });
+    del.addEventListener('click', () => { works = works.filter((x) => x.id !== it.id); scheduleSave(); renderWorks(); });
     row.append(body, sel, badge, del);
     list.appendChild(row);
   }
@@ -1451,41 +1473,6 @@ function renderHabits() {
     card.append(head, days);
     list.appendChild(card);
   }
-}
-
-// ---- 커미션·외주 명단 ----
-const COMM_STATUS = ['대기', '진행', '완료'];
-function renderCommissions() {
-  const wrap = $('#commission-list'); if (!wrap) return;
-  const sum = $('#commission-summary');
-  if (sum) {
-    const c = (st) => commissions.filter((x) => x.status === st).length;
-    sum.innerHTML = COMM_STATUS.map((st) => `<div class="lsum"><span>${st}</span><strong>${c(st)}건</strong></div>`).join('');
-  }
-  const order = { 대기: 0, 진행: 1, 완료: 2 };
-  const items = prefs.manual.commissions ? [...commissions] : [...commissions].sort((a, b) => (order[a.status] - order[b.status]) || String(a.due || '').localeCompare(String(b.due || '')));
-  wrap.innerHTML = '';
-  if (!items.length) { wrap.innerHTML = '<div class="empty-hint">등록된 명단이 없어요.</div>'; return; }
-  for (const it of items) {
-    const row = document.createElement('div'); row.className = 'comm-row'; row.dataset.id = it.id;
-    const mk = (cls, txt) => { const s = document.createElement('span'); s.className = cls; s.textContent = txt; return s; };
-    row.append(
-      mk('cm-name', it.name || '-'),
-      mk('cm-contact', it.contact || ''),
-      mk('cm-type', it.type || ''),
-      mk('cm-price', it.price ? formatWon(it.price) : ''),
-    );
-    const sel = document.createElement('select'); sel.className = 'mini-select cm-status ' + (it.status || '');
-    for (const st of COMM_STATUS) { const o = document.createElement('option'); o.value = st; o.textContent = st; if (it.status === st) o.selected = true; sel.appendChild(o); }
-    sel.addEventListener('change', () => { it.status = sel.value; scheduleSave(); renderCommissions(); });
-    row.appendChild(sel);
-    row.append(mk('cm-due', it.due || ''), mk('cm-memo', it.memo || ''));
-    const del = document.createElement('button'); del.className = 'mini-del'; del.textContent = '×';
-    del.addEventListener('click', () => { commissions = commissions.filter((x) => x.id !== it.id); scheduleSave(); renderCommissions(); });
-    row.appendChild(del);
-    wrap.appendChild(row);
-  }
-  filterCurrentRows();
 }
 
 // ---- 유튜브 음악 플레이어 ----
@@ -1649,7 +1636,7 @@ function renderStickers() {
 // ---- 데이터 백업 ----
 async function exportData() {
   if (!(window.api.data && window.api.data.export)) { toast('업데이트가 필요해요(백업 기능).'); return; }
-  const payload = { events, todos, recurring, ledger, deadlines, notes, habits, commissions, playlist, banner, bannerCfg, stickers, prefs, firedReminders };
+  const payload = { events, todos, recurring, ledger, works, notes, habits, playlist, banner, bannerCfg, stickers, prefs, firedReminders };
   const r = await window.api.data.export(payload);
   if (r && r.ok) toast('데이터를 저장했어요.');
   else if (r && r.error && r.error !== 'CANCELED') toast('내보내기 실패: ' + r.error);
@@ -1662,9 +1649,9 @@ async function importData() {
   const arr = (k) => (Array.isArray(d[k]) ? d[k] : []);
   events = Array.isArray(d.events) ? d.events : migrate(d);
   todos = arr('todos'); recurring = arr('recurring'); ledger = arr('ledger');
-  deadlines = arr('deadlines').map(migrateDeadline);
+  works = loadWorks(d); // 신형 works 또는 구형 deadlines+commissions 자동 병합
   notes = arr('notes'); habits = arr('habits');
-  commissions = arr('commissions'); playlist = arr('playlist');
+  playlist = arr('playlist');
   banner = typeof d.banner === 'string' ? d.banner : '';
   bannerCfg = (d.bannerCfg && typeof d.bannerCfg === 'object') ? { height: 180, zoom: 100, posX: 50, posY: 50, ...d.bannerCfg } : { height: 180, zoom: 100, posX: 50, posY: 50 };
   stickers = arr('stickers');
@@ -1679,6 +1666,9 @@ async function importData() {
     prefs.blurIntensity = clampInt(prefs.blurIntensity, 0, 80, 30);
     prefs.uiScale = clampInt(prefs.uiScale, 80, 150, 100);
     prefs.notifyDeadlines = (typeof prefs.notifyDeadlines === 'boolean') ? prefs.notifyDeadlines : true;
+    // 수동 정렬 플래그: 구형 deadlines/commissions → works 로 병합
+    const m = (prefs.manual && typeof prefs.manual === 'object') ? prefs.manual : {};
+    prefs.manual = { ledger: !!m.ledger, works: !!(m.works || m.deadlines || m.commissions) };
     applyTheme(prefs.theme); applyColors(colors); applyTitle(prefs.appTitle);
     applyShell();
     if (window.api.youtube && window.api.youtube.setVolume) window.api.youtube.setVolume(prefs.ytVolume);
@@ -1836,43 +1826,28 @@ function bindUI() {
   });
   $('#ledger-month').addEventListener('change', renderLedger);
 
-  // 마감 월 필터
-  $('#deadline-month').addEventListener('change', () => { deadlineMonth = $('#deadline-month').value; renderDeadlines(); });
-  $('#deadline-all').addEventListener('click', () => { deadlineMonth = ''; $('#deadline-month').value = ''; renderDeadlines(); });
+  // 작업 월 필터
+  $('#deadline-month').addEventListener('change', () => { deadlineMonth = $('#deadline-month').value; renderWorks(); });
+  $('#deadline-all').addEventListener('click', () => { deadlineMonth = ''; $('#deadline-month').value = ''; renderWorks(); });
 
-  // 마감
+  // 작업 관리 (마감·커미션·외주 통합)
   $('#deadline-form').addEventListener('submit', (e) => {
     e.preventDefault();
     const title = $('#d-title').value.trim(); const due = $('#d-due').value;
     if (!title || !due) return;
     const status = $('#d-status').value;
-    deadlines.push({
+    works.push({
       id: crypto.randomUUID(), title, due,
       client: $('#d-client').value.trim(),
+      contact: $('#d-contact').value.trim(),
       platform: $('#d-platform').value.trim(),
+      type: $('#d-type').value.trim(),
       amount: Number($('#d-amount').value) || 0,
       status, done: status === '완료',
       notes: $('#d-notes').value.trim(), progress: 0,
     });
-    ['d-title', 'd-client', 'd-platform', 'd-amount', 'd-due', 'd-notes'].forEach((id) => { $('#' + id).value = ''; });
-    scheduleSave(); renderDeadlines();
-  });
-
-  // 커미션
-  $('#commission-form').addEventListener('submit', (e) => {
-    e.preventDefault();
-    const name = $('#cm-name-in').value.trim(); if (!name) return;
-    commissions.push({
-      id: crypto.randomUUID(), name,
-      contact: $('#cm-contact-in').value.trim(),
-      type: $('#cm-type-in').value.trim(),
-      price: Number($('#cm-price-in').value) || 0,
-      status: $('#cm-status-in').value,
-      due: $('#cm-due-in').value,
-      memo: $('#cm-memo-in').value.trim(),
-    });
-    ['cm-name-in', 'cm-contact-in', 'cm-type-in', 'cm-price-in', 'cm-due-in', 'cm-memo-in'].forEach((id) => { $('#' + id).value = ''; });
-    scheduleSave(); renderCommissions();
+    ['d-title', 'd-client', 'd-contact', 'd-platform', 'd-type', 'd-amount', 'd-due', 'd-notes'].forEach((id) => { $('#' + id).value = ''; });
+    scheduleSave(); renderWorks();
   });
 
   // 유튜브
@@ -1908,13 +1883,11 @@ function bindUI() {
   enableReorder($('#yt-list'), '.yt-row', (ids) => { playlist = reorderByIds(playlist, ids); scheduleSave(); renderYouTube(); });
   enableReorder($('#notes-grid'), '.note-card', (ids) => { notes = reorderByIds(notes, ids); scheduleSave(); renderNotes(); });
   enableReorder($('#ledger-list'), '.ledger-row', (ids) => { ledger = reorderByIds(ledger, ids); prefs.manual.ledger = true; scheduleSave(); renderLedger(); });
-  enableReorder($('#deadline-list'), '.deadline-row', (ids) => { deadlines = reorderByIds(deadlines, ids); prefs.manual.deadlines = true; scheduleSave(); renderDeadlines(); });
-  enableReorder($('#commission-list'), '.comm-row', (ids) => { commissions = reorderByIds(commissions, ids); prefs.manual.commissions = true; scheduleSave(); renderCommissions(); });
+  enableReorder($('#deadline-list'), '.deadline-row', (ids) => { works = reorderByIds(works, ids); prefs.manual.works = true; scheduleSave(); renderWorks(); });
   // "자동 정렬" 복귀 버튼
   const autoBtn = (sel, key, render) => { const b = $(sel); if (b) b.addEventListener('click', () => { prefs.manual[key] = false; scheduleSave(); render(); }); };
   autoBtn('#ledger-auto', 'ledger', renderLedger);
-  autoBtn('#deadline-auto', 'deadlines', renderDeadlines);
-  autoBtn('#commission-auto', 'commissions', renderCommissions);
+  autoBtn('#deadline-auto', 'works', renderWorks);
 
   // 메모
   $('#note-add').addEventListener('click', addNote);
@@ -1992,10 +1965,9 @@ async function init() {
     todos = arr('todos');
     recurring = arr('recurring');
     ledger = arr('ledger');
-    deadlines = arr('deadlines').map(migrateDeadline);
+    works = loadWorks(data); // 신형 works 또는 구형 deadlines+commissions 자동 병합
     notes = arr('notes');
     habits = arr('habits');
-    commissions = arr('commissions');
     playlist = arr('playlist');
     banner = typeof data.banner === 'string' ? data.banner : '';
     bannerCfg = (data.bannerCfg && typeof data.bannerCfg === 'object') ? { height: 180, zoom: 100, posX: 50, posY: 50, ...data.bannerCfg } : { height: 180, zoom: 100, posX: 50, posY: 50 };
@@ -2012,7 +1984,9 @@ async function init() {
   try { prefs.colors = p.colors || JSON.parse(lsGet('colors', '{}')) || {}; } catch (_) { prefs.colors = p.colors || {}; }
   prefs.viewColors = (p.viewColors && typeof p.viewColors === 'object') ? p.viewColors : {};
   prefs.ytRepeat = (p.ytRepeat === 'all' || p.ytRepeat === 'one') ? p.ytRepeat : 'off';
-  prefs.manual = Object.assign({ ledger: false, deadlines: false, commissions: false }, (p.manual && typeof p.manual === 'object') ? p.manual : {});
+  // 수동 정렬 플래그: 구형 deadlines/commissions 플래그를 works 하나로 병합
+  const pm = (p.manual && typeof p.manual === 'object') ? p.manual : {};
+  prefs.manual = { ledger: !!pm.ledger, works: !!(pm.works || pm.deadlines || pm.commissions) };
   prefs.appTitle = p.appTitle || lsGet('appTitle', '하다');
   prefs.sidebarCollapsed = (typeof p.sidebarCollapsed === 'boolean') ? p.sidebarCollapsed : (lsGet('sidebarCollapsed', '0') === '1');
   prefs.ytVolume = clampInt(p.ytVolume, 0, 100, 100);
@@ -2070,7 +2044,7 @@ if (typeof module !== 'undefined' && module.exports) {
     fmt12, weekRangeLabel, minutesToTop, categoryColor, migrate,
     formatSize, fileIcon, kindLabel, hexToRgb, luminance, idealText,
     monthGrid, recurringDueToday, formatWon, monthKey, sumLedger,
-    daysUntil, ddayLabel, computeStreak, icon, parseYouTube, textToHtml, migrateDeadline,
+    daysUntil, ddayLabel, computeStreak, icon, parseYouTube, textToHtml, migrateWork, loadWorks,
     mix, stripHtml, ytWatchUrl, nextTrackId, resolveNextId, reorderByIds, VIEW_COLORS, VIEW_META, viewAccent,
     clampInt, eventRemindKey, eventRemindAt, deadlineRemindAt, dueReminders,
     DAY_START, DAY_END, HOUR_HEIGHT,

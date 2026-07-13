@@ -788,12 +788,11 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
 .ledger-row.income .lr-amt { color: var(--success); }
 .ledger-row.expense .lr-amt { color: var(--danger); }
 
-/* ===== 마감 추적 ===== */
+/* ===== 작업 관리 (마감·커미션·외주 통합) ===== */
 .deadline-row {
   display: flex; align-items: center; gap: 12px;
   background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px;
 }
-.deadline-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--primary); cursor: pointer; flex: 0 0 auto; }
 .dl-body { flex: 1; min-width: 0; }
 .dl-title { font-size: 14px; font-weight: 600; }
 .dl-sub { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
@@ -866,22 +865,6 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
 .dl-progress input[type="range"] { width: 96px; accent-color: var(--primary); flex: 0 0 auto; }
 .dl-pct { font-size: 11px; color: var(--text-dim); width: 36px; text-align: right; flex: 0 0 auto; }
 
-/* ===== 커미션 표 ===== */
-.comm-table { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
-.comm-row {
-  display: grid; grid-template-columns: 1fr 1fr 84px 90px 88px 100px 1fr 28px;
-  gap: 10px; align-items: center; padding: 9px 12px; border-top: 1px solid var(--border); font-size: 13px;
-}
-.comm-row.comm-head { border-top: none; background: var(--panel-2); color: var(--text-dim); font-size: 12px; }
-.cm-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cm-contact, .cm-type, .cm-due, .cm-memo { color: var(--text-dim); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cm-price { font-weight: 600; }
-select.cm-status { padding: 5px 6px; font-size: 12px; }
-@media (max-width: 900px) {
-  .comm-row { grid-template-columns: 1fr 84px 88px 28px; }
-  .cm-contact, .cm-type, .cm-due, .cm-memo { display: none; }
-}
-
 /* ===== 유튜브 플레이어 ===== */
 /* 재생 중 바 (백그라운드 오디오) */
 .yt-nowplaying {
@@ -900,7 +883,7 @@ select.cm-status { padding: 5px 6px; font-size: 12px; }
 .yt-np-vol { width: 90px; accent-color: var(--view-accent); flex: 0 0 auto; }
 
 /* 꾹 눌러 드래그로 순서 바꾸기 */
-.ledger-row, .deadline-row, .comm-row, .note-card, .yt-row { touch-action: pan-y; }
+.ledger-row, .deadline-row, .note-card, .yt-row { touch-action: pan-y; }
 body.reordering { cursor: grabbing; user-select: none; }
 .dragging {
   opacity: .9;

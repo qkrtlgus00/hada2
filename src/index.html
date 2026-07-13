@@ -41,8 +41,7 @@
           <li data-nav data-target="home"><span class="ico" data-icon="home"></span><span>홈</span></li>
           <li data-nav data-target="calendar" class="active"><span class="ico" data-icon="calendar"></span><span>일정</span></li>
           <li data-nav data-target="ledger"><span class="ico" data-icon="wallet"></span><span>가계부</span></li>
-          <li data-nav data-target="deadlines"><span class="ico" data-icon="clock"></span><span>마감 추적</span></li>
-          <li data-nav data-target="commissions"><span class="ico" data-icon="users"></span><span>커미션·외주</span></li>
+          <li data-nav data-target="deadlines"><span class="ico" data-icon="clock"></span><span>작업 관리</span></li>
           <li data-nav data-target="notes"><span class="ico" data-icon="note"></span><span>메모</span></li>
           <li data-nav data-target="youtube"><span class="ico" data-icon="music"></span><span>음악</span></li>
         </ul>
@@ -183,10 +182,10 @@
         <div class="ledger-list" id="ledger-list"></div>
       </section>
 
-      <!-- ============ 마감 추적 (작업/의뢰 관리) ============ -->
+      <!-- ============ 작업 관리 (마감·커미션·외주 통합) ============ -->
       <section class="view-pad" data-view="deadlines" id="deadlines-view" hidden>
         <div class="view-head">
-          <h1 class="view-title">마감 추적</h1>
+          <h1 class="view-title">작업 관리</h1>
           <div class="month-filter">
             <input type="month" id="deadline-month" class="mini-select" />
             <button class="soft-btn" id="deadline-all">전체</button>
@@ -195,9 +194,11 @@
         </div>
         <div class="ledger-summary" id="deadline-summary"></div>
         <form id="deadline-form" class="ledger-form" autocomplete="off">
-          <input id="d-title" type="text" maxlength="80" placeholder="작업/항목" required />
+          <input id="d-title" type="text" maxlength="80" placeholder="작업/이름" required />
           <input id="d-client" type="text" maxlength="40" placeholder="클라이언트" />
+          <input id="d-contact" type="text" maxlength="60" placeholder="연락처(SNS 등)" />
           <input id="d-platform" type="text" maxlength="30" placeholder="플랫폼" />
+          <input id="d-type" type="text" maxlength="30" placeholder="유형(반신 등)" />
           <input id="d-amount" type="number" min="0" step="1" placeholder="금액" />
           <select id="d-status" class="mini-select">
             <option value="대기">대기</option>
@@ -220,38 +221,6 @@
         <div class="notes-grid" id="notes-grid"></div>
       </section>
 
-
-      <!-- ============ 커미션·외주 명단 ============ -->
-      <section class="view-pad" data-view="commissions" id="commissions-view" hidden>
-        <div class="view-head">
-          <h1 class="view-title">명단</h1>
-          <button class="soft-btn" id="commission-auto" title="상태·마감순 자동 정렬">자동 정렬</button>
-        </div>
-        <div class="ledger-summary" id="commission-summary"></div>
-        <form id="commission-form" class="ledger-form" autocomplete="off">
-          <input id="cm-name-in" type="text" maxlength="40" placeholder="이름" required />
-          <input id="cm-contact-in" type="text" maxlength="60" placeholder="연락처(SNS 등)" />
-          <input id="cm-type-in" type="text" maxlength="30" placeholder="유형(반신 등)" />
-          <input id="cm-price-in" type="number" min="0" step="1" placeholder="가격" />
-          <select id="cm-status-in" class="mini-select">
-            <option value="대기">대기</option>
-            <option value="진행">진행</option>
-            <option value="완료">완료</option>
-          </select>
-          <input id="cm-due-in" type="date" title="마감일" />
-          <input id="cm-memo-in" type="text" maxlength="60" placeholder="메모" />
-          <button type="submit" class="add-btn">추가</button>
-        </form>
-        <div class="comm-table">
-          <div class="comm-row comm-head">
-            <span class="cm-name">이름</span><span class="cm-contact">연락처</span>
-            <span class="cm-type">유형</span><span class="cm-price">가격</span>
-            <span class="cm-status">상태</span><span class="cm-due">마감</span>
-            <span class="cm-memo">메모</span><span></span>
-          </div>
-          <div id="commission-list"></div>
-        </div>
-      </section>
 
       <!-- ============ 유튜브 음악 플레이어 ============ -->
       <section class="view-pad" data-view="youtube" id="youtube-view" hidden>
