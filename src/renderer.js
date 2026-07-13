@@ -658,10 +658,10 @@ function applyGlassCss() {
   if (prefs.backgroundMaterial === 'frost') {
     root.classList.add('glass-frost');
     const op = clampInt(prefs.windowOpacity, 15, 100, 100);
-    const fog = clampInt(prefs.blurIntensity, 0, 100, 30); // 프로스트 강도 = '블러 강도' 슬라이더
-    r.setProperty('--bg-opaque', Math.max(Math.round(op * 0.4), 18) + '%');       // 반투명 → 바탕 배어나옴(유리감)
-    r.setProperty('--surface-opaque', Math.max(Math.round(op * 0.65), 48) + '%');
-    r.setProperty('--frost-veil', (8 + Math.round(fog * 0.45)) + '%');            // 8~53% 가벼운 흰 유리(그레인+반투명으로 아크릴풍)
+    const fog = clampInt(prefs.blurIntensity, 0, 100, 30); // 위에 얹는 유리 질감 농도(미카 블러는 고정)
+    r.setProperty('--bg-opaque', Math.max(Math.round(op * 0.3), 12) + '%');        // 가볍게 → 네이티브 미카 블러가 비쳐 보임
+    r.setProperty('--surface-opaque', Math.max(Math.round(op * 0.6), 45) + '%');
+    r.setProperty('--frost-veil', (4 + Math.round(fog * 0.3)) + '%');             // 4~34% 가벼운 유리 질감(미카 위에)
     r.setProperty('--glass-blur', '0px');
     return;
   }
@@ -683,10 +683,11 @@ async function applyShell() {
     materialOk = !!(st && st.materialSupported);
     document.body.classList.toggle('is-max', !!(st && st.maximized));
   } catch (_) {}
-  // 네이티브 재질은 미카/아크릴만 (없음·뿌연은 네이티브 'none' → CSS로 처리, 깜빡임 없음)
-  if (prefs.backgroundMaterial === 'mica' || prefs.backgroundMaterial === 'acrylic') {
-    const r = await window.api.win.setMaterial(prefs.backgroundMaterial).catch(() => null);
-    if (!r || !r.ok) prefs.backgroundMaterial = 'none'; // 미지원/실패 → 설정 자가치유
+  // 진짜 배경 블러 = 미카뿐(아크릴은 깜빡임이라 제거). '미카'·'뿌연' 둘 다 네이티브 미카 사용.
+  if (prefs.backgroundMaterial === 'mica' || prefs.backgroundMaterial === 'frost') {
+    const r = await window.api.win.setMaterial('mica').catch(() => null);
+    // 미카 미지원(Win10 등): 순수 '미카'는 none으로 자가치유, '뿌연'은 CSS 질감으로 유지
+    if ((!r || !r.ok) && prefs.backgroundMaterial === 'mica') prefs.backgroundMaterial = 'none';
   }
   window.api.win.setUiScale(prefs.uiScale);
   applyGlassCss(); // 투명도는 이제 네이티브가 아니라 CSS로 (win.setOpacity 미사용)
@@ -2261,8 +2262,9 @@ function bindUI() {
   if (wMat) wMat.querySelectorAll('.seg-btn').forEach((b) => b.addEventListener('click', async () => {
     if (!window.api.win) return;
     const m = b.dataset.m;
-    const nativeM = (m === 'mica' || m === 'acrylic') ? m : 'none'; // 없음·뿌연 → 네이티브 none(깜빡임 없음)
-    const r = await window.api.win.setMaterial(nativeM);
+    let nativeM = (m === 'mica' || m === 'frost') ? 'mica' : 'none'; // 뿌연도 진짜 흐림 위해 미카 사용
+    let r = await window.api.win.setMaterial(nativeM);
+    if ((!r || !r.ok) && m === 'frost') { nativeM = 'none'; r = await window.api.win.setMaterial('none'); } // 미카 미지원(Win10) → 뿌연은 CSS 질감만
     if (!r || !r.ok) {
       toast(r && r.reason === 'UNSUPPORTED' ? '블러는 Windows 11(22H2 이상)에서만 지원돼요.' : '블러를 적용할 수 없어요.');
       return;
