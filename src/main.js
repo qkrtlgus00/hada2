@@ -130,8 +130,14 @@ function startAppServer() {
         // 경로 traversal 방지: root 밖 접근 차단
         const filePath = path.normalize(path.join(root, urlPath));
         if (!filePath.startsWith(root)) { res.statusCode = 403; res.end('forbidden'); return; }
-        const data = await fsp.readFile(filePath);
         res.setHeader('Content-Type', MIME[path.extname(filePath).toLowerCase()] || 'application/octet-stream');
+        // index.html: 저장된 테마를 <html>에 미리 주입 → 시작 시 테마 깜빡임(FOUC) 제거
+        if (filePath.toLowerCase().endsWith('index.html')) {
+          let html = await fsp.readFile(filePath, 'utf8');
+          if (bootShell.theme === 'dark') html = html.replace('<html lang="ko">', '<html lang="ko" data-theme="dark">');
+          res.end(html); return;
+        }
+        const data = await fsp.readFile(filePath);
         res.end(data);
       } catch (_) { res.statusCode = 404; res.end('not found'); }
     });
@@ -181,10 +187,48 @@ function sanitizeShellPrefs(p) {
     theme: o.theme === 'dark' ? 'dark' : 'light',
   };
 }
+// ===== 창 크기/위치 저장·복원 (data.json과 별도 파일로 경합 방지) =====
+const WSTATE_FILE = path.join(app.getPath('userData'), 'window-state.json');
+function restoreWindowState() {
+  try {
+    const s = JSON.parse(fs.readFileSync(WSTATE_FILE, 'utf8'));
+    const out = { maximized: !!s.maximized };
+    if (Number.isFinite(s.width) && Number.isFinite(s.height) && s.width >= 480 && s.height >= 400) {
+      out.width = Math.round(s.width); out.height = Math.round(s.height);
+    }
+    if (Number.isFinite(s.x) && Number.isFinite(s.y)) {
+      // 저장된 위치가 어느 디스플레이 작업영역과 겹칠 때만 사용 (모니터 분리 시 화면 밖 방지)
+      try {
+        const { screen } = require('electron');
+        const w = out.width || 960, h = out.height || 720;
+        const onScreen = screen.getAllDisplays().some((d) => {
+          const a = d.workArea;
+          return s.x < a.x + a.width && s.x + w > a.x && s.y < a.y + a.height && s.y + h > a.y;
+        });
+        if (onScreen) { out.x = Math.round(s.x); out.y = Math.round(s.y); }
+      } catch (_) {}
+    }
+    return out;
+  } catch (_) { return { maximized: false }; }
+}
+let wsaveTimer = null;
+function saveWindowState() {
+  try {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    const b = mainWindow.getNormalBounds(); // 최대화/최소화 중에도 '보통 크기' 반환
+    const tmp = WSTATE_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify({ x: b.x, y: b.y, width: b.width, height: b.height, maximized: mainWindow.isMaximized() }), 'utf8');
+    fs.renameSync(tmp, WSTATE_FILE);
+  } catch (_) {}
+}
+function saveWindowStateDebounced() { if (wsaveTimer) clearTimeout(wsaveTimer); wsaveTimer = setTimeout(saveWindowState, 400); }
+
 function createWindow(useFileFallback) {
+  const winState = restoreWindowState();
   mainWindow = new BrowserWindow({
-    width: 960,
-    height: 720,
+    width: winState.width || 960,
+    height: winState.height || 720,
+    ...(winState.x != null ? { x: winState.x, y: winState.y } : {}),
     minWidth: 480,
     minHeight: 400,
     title: '하다 — 할 일 & 메모',
@@ -213,6 +257,11 @@ function createWindow(useFileFallback) {
   mainWindow.on('maximize', sendMax);
   mainWindow.on('unmaximize', sendMax);
 
+  // 창 크기/위치 저장(리사이즈·이동 디바운스) + 저장된 최대화 상태 복원
+  mainWindow.on('resize', saveWindowStateDebounced);
+  mainWindow.on('move', saveWindowStateDebounced);
+  if (winState.maximized) mainWindow.maximize();
+
   // 메뉴바 제거로 사라진 기본 단축키 복구 (DevTools / 새로고침)
   mainWindow.webContents.on('before-input-event', (e, input) => {
     if (input.type !== 'keyDown') return;
@@ -229,6 +278,7 @@ function createWindow(useFileFallback) {
 
   // 창 닫기 → 종료 대신 트레이로 숨김(음악 계속). 진짜 종료는 트레이 메뉴/Alt+F4 후 isQuitting.
   mainWindow.on('close', (e) => {
+    saveWindowState(); // 닫기/종료 직전 크기·위치 저장
     if (!app.isQuitting && tray) {
       e.preventDefault();
       mainWindow.hide();
@@ -630,7 +680,13 @@ ipcMain.handle('data:import', async () => {
 });
 
 // ---- 앱 라이프사이클 ----
+// 단일 인스턴스: 두 번째 실행 시 기존 창을 띄우고 자신은 종료 (창 중복 방지)
+const gotSingleLock = app.requestSingleInstanceLock();
+if (!gotSingleLock) app.quit();
+app.on('second-instance', () => showMainWindow());
+
 app.whenReady().then(async () => {
+  if (!gotSingleLock) return; // 두 번째 인스턴스는 창을 만들지 않고 종료됨
   Menu.setApplicationMenu(null); // 기본(영어) 메뉴바 제거
 
   // 구버전 구글 연동이 남긴 자격증명/토큰 파일 정리 (없으면 무해한 no-op)
