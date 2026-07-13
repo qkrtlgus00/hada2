@@ -1000,6 +1000,8 @@ body.reordering { cursor: grabbing; user-select: none; }
   background: var(--surface); box-shadow: var(--shadow); white-space: nowrap;
 }
 .sticker:hover .sticker-tools, .sticker.selected .sticker-tools { display: flex; }
+/* 설정에서 '스티커 버튼 툴바 숨기기' 켜면 버튼 툴바를 안 띄움(이동·크기·회전 핸들은 유지) */
+body.hide-sticker-tools .sticker-tools { display: none !important; }
 .sticker-tools.below { top: calc(100% + 6px); } /* 스티커가 위쪽이면 툴바를 아래로 (잘림 방지) */
 /* 스티커와 툴바 사이 ~6px 틈을 투명 브리지로 메워 hover가 끊기지 않게(버튼까지 마우스가 닿음) */
 .sticker-tools::after { content: ''; position: absolute; left: 0; right: 0; top: 100%; height: 10px; }

@@ -48,6 +48,7 @@ let prefs = {
   windowOpacity: 100, backgroundMaterial: 'none', blurIntensity: 30, uiScale: 100,
   windowTransparent: false, // 기본 불투명(솔리드). 켜면 바탕화면 비침
   notifyDeadlines: true,
+  hideStickerTools: false, // 켜면 스티커 클릭 시 버튼 툴바(잠금·투명·앞·뒤·×) 안 뜸
   manual: { ledger: false, works: false },
 };
 let miniMonth = new Date(); // 미니 달력이 보는 달
@@ -687,6 +688,7 @@ function syncShellControls() {
     b.title = unsupported ? 'Windows 11(22H2 이상)에서만 지원돼요.' : '';
   });
   const dn = $('#pref-deadline-notify'); if (dn) dn.checked = prefs.notifyDeadlines !== false;
+  const hst = $('#pref-hide-sticker-tools'); if (hst) hst.checked = !!prefs.hideStickerTools;
 }
 
 // ---- 드래그로 순서 바꾸기 (꾹 눌러 롱프레스) ----
@@ -1356,14 +1358,15 @@ function renderHome() {
   const activeTodos = todos.filter((t) => !t.done).length;
   const upcoming = works.filter((d) => d.status !== '완료' && d.due).sort((a, b) => a.due.localeCompare(b.due));
   const led = sumLedger(ledger, ym);
-  const habitsToday = habits.filter((h) => h.log && h.log[today]).length;
+  const recentNote = notes.slice().sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0];
+  const memoPreview = recentNote ? (notePreview(recentNote).slice(0, 24) || '(빈 메모)') : '없음';
   const cards = [
     { ic: 'calendar', label: '오늘 일정', value: `${todayEvents}건`, view: 'calendar' },
     { ic: 'check', label: '남은 할일', value: `${activeTodos}개`, view: 'calendar' },
     { ic: 'clock', label: '다가오는 마감', value: upcoming.length ? `${upcoming[0].title} · ${ddayLabel(daysUntil(upcoming[0].due, today))}` : '없음', view: 'deadlines' },
     { ic: 'wallet', label: '이번 달 지출', value: formatWon(led.expense), view: 'ledger' },
     { ic: 'check', label: '진행중 작업', value: works.filter((w) => w.status === '진행중').length + '건', view: 'deadlines' },
-    { ic: 'check', label: '오늘 습관', value: habits.length ? `${habitsToday}/${habits.length}` : '없음', view: 'calendar' },
+    { ic: 'note', label: '메모', value: memoPreview, view: 'notes' },
   ];
   grid.innerHTML = '';
   cards.forEach((c, i) => {
@@ -2078,11 +2081,13 @@ async function importData() {
     prefs.uiScale = clampInt(prefs.uiScale, 80, 150, 100);
     prefs.windowTransparent = (typeof prefs.windowTransparent === 'boolean') ? prefs.windowTransparent : false;
     prefs.notifyDeadlines = (typeof prefs.notifyDeadlines === 'boolean') ? prefs.notifyDeadlines : true;
+    prefs.hideStickerTools = (typeof prefs.hideStickerTools === 'boolean') ? prefs.hideStickerTools : false;
     // 수동 정렬 플래그: 구형 deadlines/commissions → works 로 병합
     const m = (prefs.manual && typeof prefs.manual === 'object') ? prefs.manual : {};
     prefs.manual = { ledger: !!m.ledger, works: !!(m.works || m.deadlines || m.commissions) };
     applyColors(colors); applyTitle(prefs.appTitle);
     applyShell();
+    document.body.classList.toggle('hide-sticker-tools', !!prefs.hideStickerTools);
     if (window.api.youtube && window.api.youtube.setVolume) window.api.youtube.setVolume(prefs.ytVolume);
   }
   scheduleSave();
@@ -2226,6 +2231,9 @@ function bindUI() {
   // 마감 자동 알림 토글
   const dn = $('#pref-deadline-notify');
   if (dn) dn.addEventListener('change', () => { prefs.notifyDeadlines = dn.checked; scheduleSave(); });
+  // 스티커 버튼 툴바 숨기기 토글
+  const hst = $('#pref-hide-sticker-tools');
+  if (hst) hst.addEventListener('change', () => { prefs.hideStickerTools = hst.checked; document.body.classList.toggle('hide-sticker-tools', hst.checked); scheduleSave(); });
 
   // 미니 달력 이동
   $('#mini-prev').addEventListener('click', () => { miniMonth = new Date(miniMonth.getFullYear(), miniMonth.getMonth() - 1, 1); renderMiniCal(); });
@@ -2469,6 +2477,7 @@ async function init() {
   prefs.uiScale = clampInt(p.uiScale, 80, 150, 100);
   prefs.windowTransparent = (typeof p.windowTransparent === 'boolean') ? p.windowTransparent : false;
   prefs.notifyDeadlines = (typeof p.notifyDeadlines === 'boolean') ? p.notifyDeadlines : true;
+  prefs.hideStickerTools = (typeof p.hideStickerTools === 'boolean') ? p.hideStickerTools : false;
   prefs.uiRevamp = p.uiRevamp || '';
   firedReminders = (data && data.firedReminders && typeof data.firedReminders === 'object') ? data.firedReminders : {};
 
@@ -2486,6 +2495,7 @@ async function init() {
   applyTitle(prefs.appTitle);
   applyGlassCss(); // 불투명/투명 표면 알파를 즉시 반영 (시작 시 깜빡임 방지)
   applyShell(); // 창 배율/재질을 네이티브 창과 동기화 (materialOk 확정 후 재적용)
+  document.body.classList.toggle('hide-sticker-tools', !!prefs.hideStickerTools); // 스티커 버튼 툴바 표시 여부
   injectIcons();
 
   deadlineMonth = monthKey(ymd(new Date())); // 마감 기본: 이번 달
