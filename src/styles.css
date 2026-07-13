@@ -31,6 +31,8 @@
   --text-mute: #9aa1af;
   --border: #eaedf4;
   --border-2: #e1e5ee;
+  --grid-line: #eaedf4; /* 표/달력 격자선 — 투명 모드에서도 유지(투명화 대상 아님) */
+  --track: #e1e5ee;     /* 스크롤바·진행바·토글 트랙 배경 — 투명화 대상 아님 */
   --accent: #1a73e8;        /* 강조 버튼 = 구글 블루 */
   --primary: #1a73e8;
   --danger: #e5484d;
@@ -70,9 +72,8 @@ body {
   color: var(--text);
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
-  /* 실제 배경 블러: 창이 transparent라 뒤(바탕화면)를 흐리게. '블러 강도' 슬라이더(0~100)가 --glass-blur(px) 조절 */
-  backdrop-filter: blur(var(--glass-blur)) saturate(1.08);
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.08);
+  /* backdrop-filter는 투명 프레임리스 창에서 투명도 깜빡임(GPU 컴포지팅 버그)을 유발해 제거함.
+     배경 비침은 --bg-opaque/--surface-opaque 알파로 처리, 실제 흐림은 설정의 미카/아크릴(네이티브)로. */
   /* 투명창 둥근 모서리 (코너에 바탕화면 비침) — 최대화 시 각지게 */
   border-radius: 12px;
   overflow: hidden;
@@ -80,25 +81,9 @@ body {
 /* 불투명 모드·최대화 시 각진 모서리 (투명 모드에서만 둥근 코너) */
 :root.app-opaque body, body.is-max { border-radius: 0; }
 
-/* 투명 모드에서만 콘텐츠 카드 겉선(테두리) 제거 → 깔끔한 글래스.
-   불투명 모드/달력 그리드선/구분선/입력창(--border-2) 테두리는 그대로. */
-:root:not(.app-opaque) .main,
-:root:not(.app-opaque) .side-card,
-:root:not(.app-opaque) .home-card,
-:root:not(.app-opaque) .home-banner,
-:root:not(.app-opaque) .lsum,
-:root:not(.app-opaque) .ledger-stats,
-:root:not(.app-opaque) .deadline-row,
-:root:not(.app-opaque) .note-card,
-:root:not(.app-opaque) .habit-card,
-:root:not(.app-opaque) .yt-nowplaying,
-:root:not(.app-opaque) .yt-row,
-:root:not(.app-opaque) .vc-item,
-:root:not(.app-opaque) .mini-tag {
-  border-color: transparent;
-}
-:root:not(.app-opaque) .home-card:hover,
-:root:not(.app-opaque) .note-card:hover { border-color: transparent; }
+/* 투명 모드에서만 흰 테두리(--border/--border-2) 전부 투명화 → 카드·버튼·입력·구분선 겉선 제거.
+   표/달력 격자선(--grid-line)·스크롤바/바 배경(--track)은 별도 변수라 그대로 유지. 불투명 모드는 그대로. */
+:root:not(.app-opaque) { --border: transparent; --border-2: transparent; }
 
 /* ===== 투명창 글자 가독성 보호 (반투명 표면 위 글자에 그림자) ===== */
 /* 사이드바 흰 글자: 어두운 그림자로 어떤 바탕화면에서도 또렷 */
@@ -426,12 +411,12 @@ body.is-max #tb-max .i-restore { display: block; }
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--grid-line);
 }
 
 .cal-head {
   display: flex;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--grid-line);
   padding-right: 12px; /* 스크롤바 보정 */
 }
 .time-gutter-head { width: 56px; flex: 0 0 auto; }
@@ -441,7 +426,7 @@ body.is-max #tb-max .i-restore { display: block; }
   padding: 12px 4px;
   font-size: 12.5px;
   color: var(--text-dim);
-  border-left: 1px solid var(--border);
+  border-left: 1px solid var(--grid-line);
 }
 .day-head.today {
   background: var(--accent);
@@ -469,12 +454,12 @@ body.is-max #tb-max .i-restore { display: block; }
 .day-col {
   flex: 1 1 0;
   position: relative;
-  border-left: 1px solid var(--border);
+  border-left: 1px solid var(--grid-line);
 }
 .day-col.today { background: rgba(91, 108, 255, 0.03); }
 .hour-line {
   position: absolute; left: 0; right: 0;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--grid-line);
 }
 
 /* 이벤트 블록 */
@@ -586,7 +571,7 @@ body.is-max #tb-max .i-restore { display: block; }
 .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
 .switch i {
   position: absolute; inset: 0; cursor: pointer;
-  background: var(--border-2); border-radius: 999px; transition: .15s;
+  background: var(--track); border-radius: 999px; transition: .15s;
 }
 .switch i::before {
   content: ""; position: absolute; height: 18px; width: 18px; left: 3px; top: 3px;
@@ -678,7 +663,7 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
 /* 스크롤바 */
 .cal-body::-webkit-scrollbar, .sidebar::-webkit-scrollbar { width: 8px; height: 8px; }
 .cal-body::-webkit-scrollbar-thumb, .sidebar::-webkit-scrollbar-thumb {
-  background: var(--border-2); border-radius: 8px;
+  background: var(--track); border-radius: 8px;
 }
 
 /* ===== 브랜드 제목 ===== */
@@ -805,7 +790,7 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
 .lstat-row { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
 .lstat-name { flex: 0 0 34%; max-width: 34%; display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .lstat-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
-.lstat-bar { flex: 1; height: 8px; background: var(--border-2); border-radius: 999px; overflow: hidden; }
+.lstat-bar { flex: 1; height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; }
 .lstat-bar-fill { display: block; height: 100%; border-radius: 999px; }
 .lstat-amt { flex: 0 0 auto; color: var(--text-dim); white-space: nowrap; }
 .lstat-amt em { font-style: normal; color: var(--text-mute); margin-left: 2px; }
@@ -828,7 +813,7 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
 .ledger-row .lr-ico .ic-svg { width: 18px; height: 18px; }
 /* 표 헤더 행 (참고 ALL FILES) */
 .ledger-head {
-  background: transparent; border: none; border-bottom: 1px solid var(--border); border-radius: 0;
+  background: transparent; border: none; border-bottom: 1px solid var(--grid-line); border-radius: 0;
   color: var(--text-mute); font-size: 11.5px; letter-spacing: .03em; text-transform: uppercase;
   padding-bottom: 6px; pointer-events: none;
 }
@@ -898,7 +883,7 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
 .view-pad::-webkit-scrollbar, .schedule-left::-webkit-scrollbar { width: 8px; height: 8px; }
 .cal-body::-webkit-scrollbar-thumb, .sidebar::-webkit-scrollbar-thumb,
 .view-pad::-webkit-scrollbar-thumb, .schedule-left::-webkit-scrollbar-thumb {
-  background: var(--border-2); border-radius: 8px;
+  background: var(--track); border-radius: 8px;
 }
 
 /* ===== 라인 아이콘 ===== */
@@ -912,7 +897,7 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
 
 /* ===== 마감 진행도 ===== */
 .dl-progress { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
-.dl-bar { flex: 1; height: 6px; background: var(--border-2); border-radius: 999px; overflow: hidden; }
+.dl-bar { flex: 1; height: 6px; background: var(--track); border-radius: 999px; overflow: hidden; }
 .dl-bar-fill { height: 100%; background: var(--accent); border-radius: 999px; transition: width .1s; }
 .dl-progress input[type="range"] { width: 96px; accent-color: var(--primary); flex: 0 0 auto; }
 .dl-pct { font-size: 11px; color: var(--text-dim); width: 36px; text-align: right; flex: 0 0 auto; }
