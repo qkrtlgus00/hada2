@@ -38,8 +38,8 @@
   /* 탭(뷰)별 연결색 — JS setView가 뷰마다 덮어씀 */
   --view-accent: var(--primary);
 
-  /* 파란 캔버스·사이드바의 은은한 기하 패턴 (참고 이미지 무늬) */
-  --sb-pattern: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='72' height='72'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='0.05'%3E%3Ccircle cx='18' cy='18' r='26'/%3E%3Ccircle cx='60' cy='58' r='18'/%3E%3C/g%3E%3C/svg%3E");
+  /* 배경 무늬 없음 (사용자 요청으로 제거) */
+  --sb-pattern: none;
 
   /* 사용자 지정 색 파생 변수 (기본값=블루 테마; 사용자 지정 시 JS가 덮어씀) */
   --accent-text: #ffffff;                       /* 강조버튼 글자색(파랑 위 흰색) */
@@ -91,7 +91,8 @@ body {
   border-radius: 12px;
   overflow: hidden;
 }
-body.is-max { border-radius: 0; }
+/* 불투명 모드·최대화 시 각진 모서리 (투명 모드에서만 둥근 코너) */
+:root.app-opaque body, body.is-max { border-radius: 0; }
 
 /* ===== 투명창 글자 가독성 보호 (반투명 표면 위 글자에 그림자) ===== */
 /* 사이드바 흰 글자: 어두운 그림자로 어떤 바탕화면에서도 또렷 */
@@ -980,14 +981,30 @@ body.reordering { cursor: grabbing; user-select: none; }
 /* ===== 스티커 ===== */
 .main { position: relative; }
 .sticker-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 50; }
-.sticker { position: absolute; pointer-events: auto; cursor: grab; user-select: none; }
-.sticker.dragging { cursor: grabbing; opacity: .92; }
+.sticker { position: absolute; pointer-events: auto; cursor: grab; user-select: none; transform-origin: center; }
+.sticker.dragging { cursor: grabbing; }
+.sticker.locked { cursor: default; }
 .sticker img { width: 100%; height: auto; display: block; pointer-events: none; -webkit-user-drag: none; }
-.sticker-del {
-  position: absolute; top: -8px; right: -8px; width: 18px; height: 18px; border-radius: 50%;
-  border: none; background: #e5484d; color: #fff; font-size: 12px; line-height: 1; cursor: pointer; display: none;
+/* 편집 시 외곽선 힌트 */
+.sticker:hover { outline: 1.5px dashed color-mix(in srgb, var(--primary) 60%, transparent); outline-offset: 3px; }
+.sticker.locked:hover { outline-style: solid; outline-color: color-mix(in srgb, var(--text-mute) 60%, transparent); }
+/* 호버 툴바 (스티커 위) */
+.sticker-tools {
+  position: absolute; top: -34px; left: 50%; transform: translateX(-50%);
+  display: none; gap: 4px; padding: 3px; border-radius: 8px;
+  background: var(--panel); box-shadow: var(--shadow); white-space: nowrap;
 }
-.sticker:hover .sticker-del { display: block; }
+.sticker:hover .sticker-tools { display: flex; }
+.st-btn {
+  border: 1px solid var(--border-2); background: var(--panel); color: var(--text);
+  border-radius: 6px; padding: 2px 7px; font-size: 11.5px; font-family: inherit; cursor: pointer; line-height: 1.4;
+}
+.st-btn:hover { background: var(--panel-2); }
+/* 크기/회전 핸들 */
+.st-handle { position: absolute; display: none; background: var(--primary); border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.sticker:hover .st-handle { display: block; }
+.st-resize { right: -7px; bottom: -7px; width: 14px; height: 14px; border-radius: 3px; cursor: nwse-resize; }
+.st-rot { left: -7px; top: -7px; width: 14px; height: 14px; border-radius: 50%; cursor: grab; }
 
 /* ===== 메모 서식 에디터 ===== */
 .note-toolbar { display: flex; gap: 3px; margin: 0 0 8px; padding-right: 20px; flex-wrap: wrap; }

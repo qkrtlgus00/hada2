@@ -46,6 +46,7 @@ let prefs = {
   theme: 'light', colors: {}, viewColors: {}, appTitle: '하다', sidebarCollapsed: false,
   ytRepeat: 'off', ytVolume: 100,
   windowOpacity: 100, backgroundMaterial: 'none', blurIntensity: 30, uiScale: 100,
+  windowTransparent: false, // 기본 불투명(솔리드). 켜면 바탕화면 비침
   notifyDeadlines: true,
   manual: { ledger: false, works: false },
 };
@@ -589,6 +590,15 @@ let materialOk = false; // 이 OS에서 미카/아크릴 지원 여부 (window:g
 // 페이지(여백)는 더 강하게 비치고(하한 낮음), 표면(사이드바/본문)은 글자 뒤 최소 대비를 위해
 // 덜 비치게(하한 높음) 한다. 글자는 여기에 더해 text-shadow로 항상 또렷하게 보호.
 function applyGlassCss() {
+  const root = document.documentElement;
+  // 불투명 모드: 표면을 100% 불투명 + 각진 모서리로 강제(즉시 전환, 창은 계속 투명이지만 완전 솔리드처럼 보임)
+  if (!prefs.windowTransparent) {
+    root.classList.add('app-opaque');
+    root.style.setProperty('--bg-opaque', '100%');
+    root.style.setProperty('--surface-opaque', '100%');
+    return;
+  }
+  root.classList.remove('app-opaque');
   const blurOn = prefs.backgroundMaterial !== 'none' && materialOk;
   const base = clampInt(prefs.windowOpacity, 40, 100, 100);           // 40~100
   const extra = blurOn ? clampInt(prefs.blurIntensity, 0, 80, 30) : 0; // 추가 비침
@@ -615,8 +625,9 @@ async function applyShell() {
 }
 // 설정 모달의 창/화면 컨트롤을 현재 prefs와 동기화
 function syncShellControls() {
+  const tr = $('#w-transparent'); if (tr) tr.checked = !!prefs.windowTransparent;
   const op = $('#w-opacity'), ov = $('#w-opacity-val'), oh = $('#w-opacity-hint');
-  if (op) op.value = String(prefs.windowOpacity); // 투명도·흐림 동시 사용 가능 (비활성화 안 함)
+  if (op) { op.value = String(prefs.windowOpacity); op.disabled = !prefs.windowTransparent; } // 투명 효과 꺼짐 → 투명도 무의미
   if (ov) ov.textContent = prefs.windowOpacity + '%';
   if (oh) oh.hidden = true;
   const gl = $('#w-glass'), gv = $('#w-glass-val');
@@ -1610,31 +1621,84 @@ function refreshBannerPreview() {
   applyBannerStyle();
 }
 
-// ---- 스티커 (탭별, 드래그) ----
+// ---- 스티커 (탭별, 드래그·크기·회전·투명도·앞뒤·잠금) ----
 async function addSticker() {
   if (!(window.api.image && window.api.image.pick)) { toast('업데이트가 필요해요(스티커).'); return; }
   const r = await window.api.image.pick();
   if (!r || !r.ok) { if (r && r.error && r.error !== 'CANCELED') toast('이미지 오류: ' + r.error); return; }
-  stickers.push({ id: crypto.randomUUID(), view: currentView, src: r.dataUrl, x: 40, y: 40, w: 120 });
+  stickers.push({ id: crypto.randomUUID(), view: currentView, src: r.dataUrl, x: 40, y: 40, w: 120, rot: 0, opacity: 100, locked: false });
   scheduleSave(); renderStickers();
-  toast('스티커를 추가했어요. 드래그해서 옮기세요.');
+  toast('스티커를 추가했어요. 드래그로 이동, 모서리로 크기/회전, 위 버튼으로 꾸며요.');
 }
 function renderStickers() {
   const layer = $('#sticker-layer'); if (!layer) return;
   layer.innerHTML = '';
   for (const s of stickers.filter((x) => x.view === currentView)) {
+    const rot = Number(s.rot) || 0;
+    const opacity = s.opacity == null ? 100 : Number(s.opacity);
+    const locked = !!s.locked;
     const el = document.createElement('div');
-    el.className = 'sticker';
+    el.className = 'sticker' + (locked ? ' locked' : '');
     el.style.left = (s.x || 0) + 'px';
     el.style.top = (s.y || 0) + 'px';
     el.style.width = (s.w || 120) + 'px';
+    el.style.transform = 'rotate(' + rot + 'deg)';
+    el.style.opacity = String(Math.max(0, Math.min(100, opacity)) / 100);
     const img = document.createElement('img'); img.src = s.src; img.draggable = false; img.alt = '스티커';
-    const del = document.createElement('button'); del.className = 'sticker-del'; del.textContent = '×';
-    del.addEventListener('click', () => { stickers = stickers.filter((x) => x.id !== s.id); scheduleSave(); renderStickers(); });
-    el.append(img, del);
-    // 드래그 이동
+    el.appendChild(img);
+
+    // 툴바 (hover 표시)
+    const tools = document.createElement('div'); tools.className = 'sticker-tools';
+    const mkBtn = (label, title, fn) => {
+      const b = document.createElement('button'); b.className = 'st-btn'; b.textContent = label; b.title = title;
+      b.addEventListener('pointerdown', (e) => e.stopPropagation());
+      b.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+      return b;
+    };
+    const lockBtn = mkBtn(locked ? '해제' : '잠금', locked ? '잠금 해제' : '고정', () => { s.locked = !locked; scheduleSave(); renderStickers(); });
+    tools.appendChild(lockBtn);
+    if (!locked) {
+      tools.appendChild(mkBtn('투명', '투명도 바꾸기', () => { s.opacity = (opacity <= 40 ? 100 : opacity - 30); scheduleSave(); renderStickers(); }));
+      tools.appendChild(mkBtn('앞', '맨 앞으로', () => { stickers = stickers.filter((x) => x.id !== s.id); stickers.push(s); scheduleSave(); renderStickers(); }));
+      tools.appendChild(mkBtn('뒤', '맨 뒤로', () => { stickers = stickers.filter((x) => x.id !== s.id); stickers.unshift(s); scheduleSave(); renderStickers(); }));
+      tools.appendChild(mkBtn('×', '삭제', () => { stickers = stickers.filter((x) => x.id !== s.id); scheduleSave(); renderStickers(); }));
+    }
+    el.appendChild(tools);
+
+    if (!locked) {
+      // 크기 조절 핸들 (우하단)
+      const resize = document.createElement('div'); resize.className = 'st-handle st-resize'; resize.title = '드래그로 크기 조절';
+      resize.addEventListener('pointerdown', (e) => {
+        e.stopPropagation(); e.preventDefault();
+        const startX = e.clientX, startW = s.w || 120;
+        resize.setPointerCapture(e.pointerId);
+        const move = (ev) => { s.w = Math.max(40, Math.min(600, startW + (ev.clientX - startX))); el.style.width = s.w + 'px'; };
+        const up = () => { resize.removeEventListener('pointermove', move); resize.removeEventListener('pointerup', up); scheduleSave(); };
+        resize.addEventListener('pointermove', move); resize.addEventListener('pointerup', up);
+      });
+      el.appendChild(resize);
+      // 회전 핸들 (상단 중앙)
+      const rotH = document.createElement('div'); rotH.className = 'st-handle st-rot'; rotH.title = '드래그로 회전 (Shift=15° 스냅)';
+      rotH.addEventListener('pointerdown', (e) => {
+        e.stopPropagation(); e.preventDefault();
+        const rect = el.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+        rotH.setPointerCapture(e.pointerId);
+        const move = (ev) => {
+          let deg = Math.atan2(ev.clientY - cy, ev.clientX - cx) * 180 / Math.PI + 90;
+          if (ev.shiftKey) deg = Math.round(deg / 15) * 15;
+          s.rot = Math.round(deg);
+          el.style.transform = 'rotate(' + s.rot + 'deg)';
+        };
+        const up = () => { rotH.removeEventListener('pointermove', move); rotH.removeEventListener('pointerup', up); scheduleSave(); };
+        rotH.addEventListener('pointermove', move); rotH.addEventListener('pointerup', up);
+      });
+      el.appendChild(rotH);
+    }
+
+    // 이동 드래그 (잠금·핸들·툴바 제외)
     el.addEventListener('pointerdown', (e) => {
-      if (e.target === del) return;
+      if (locked || e.target.closest('.st-handle, .sticker-tools')) return;
       e.preventDefault();
       const layerRect = layer.getBoundingClientRect();
       const offX = e.clientX - layerRect.left - (s.x || 0);
@@ -1691,6 +1755,7 @@ async function importData() {
     prefs.backgroundMaterial = ['none', 'mica', 'acrylic'].includes(prefs.backgroundMaterial) ? prefs.backgroundMaterial : 'none';
     prefs.blurIntensity = clampInt(prefs.blurIntensity, 0, 80, 30);
     prefs.uiScale = clampInt(prefs.uiScale, 80, 150, 100);
+    prefs.windowTransparent = (typeof prefs.windowTransparent === 'boolean') ? prefs.windowTransparent : false;
     prefs.notifyDeadlines = (typeof prefs.notifyDeadlines === 'boolean') ? prefs.notifyDeadlines : true;
     // 수동 정렬 플래그: 구형 deadlines/commissions → works 로 병합
     const m = (prefs.manual && typeof prefs.manual === 'object') ? prefs.manual : {};
@@ -1794,7 +1859,12 @@ function bindUI() {
   const upBtn = $('#update-check'); if (upBtn) upBtn.addEventListener('click', manualUpdateCheck);
   renderPresets();
 
-  // 창 / 화면 설정 (투명도·블러·배율) — 투명도는 앱 내부(CSS) 방식이라 블러와 동시 사용 가능
+  // 창 / 화면 설정 (투명 효과 토글 · 투명도 · 블러 · 배율)
+  const wTr = $('#w-transparent');
+  if (wTr) wTr.addEventListener('change', () => {
+    prefs.windowTransparent = wTr.checked; // 즉시 전환(재시작 불필요)
+    applyGlassCss(); syncShellControls(); scheduleSave();
+  });
   const wOp = $('#w-opacity');
   if (wOp) wOp.addEventListener('input', () => {
     prefs.windowOpacity = Number(wOp.value);
@@ -2042,6 +2112,7 @@ async function init() {
   prefs.backgroundMaterial = ['none', 'mica', 'acrylic'].includes(p.backgroundMaterial) ? p.backgroundMaterial : 'none';
   prefs.blurIntensity = clampInt(p.blurIntensity, 0, 80, 30);
   prefs.uiScale = clampInt(p.uiScale, 80, 150, 100);
+  prefs.windowTransparent = (typeof p.windowTransparent === 'boolean') ? p.windowTransparent : false;
   prefs.notifyDeadlines = (typeof p.notifyDeadlines === 'boolean') ? p.notifyDeadlines : true;
   prefs.uiRevamp = p.uiRevamp || '';
   firedReminders = (data && data.firedReminders && typeof data.firedReminders === 'object') ? data.firedReminders : {};
@@ -2059,7 +2130,8 @@ async function init() {
   applyTheme(prefs.theme);
   applyColors(colors);
   applyTitle(prefs.appTitle);
-  applyShell(); // 창 투명도/블러/배율을 네이티브 창과 동기화 (main이 시작 시 적용한 값과 정합)
+  applyGlassCss(); // 불투명/투명 표면 알파를 즉시 반영 (시작 시 깜빡임 방지)
+  applyShell(); // 창 배율/재질을 네이티브 창과 동기화 (materialOk 확정 후 재적용)
   injectIcons();
 
   deadlineMonth = monthKey(ymd(new Date())); // 마감 기본: 이번 달
