@@ -2479,6 +2479,8 @@ function bindUI() {
     prefs.sidebarCollapsed = sidebar.classList.contains('collapsed');
     try { localStorage.setItem('sidebarCollapsed', prefs.sidebarCollapsed ? '1' : '0'); } catch (_) {}
     scheduleSave();
+    // 사이드바 폭이 바뀌면 본문(스티커 레이어) 크기도 바뀜 → 전환 후 스티커 재배치/툴바 재판정
+    setTimeout(renderStickers, 280);
   };
   $('#sidebar-collapse').addEventListener('click', toggleSidebar);
   document.querySelector('.brand').addEventListener('click', () => {
@@ -2488,6 +2490,13 @@ function bindUI() {
   // 스티커 바깥을 누르면 선택 해제(버튼 툴바 숨김). 스티커/버튼 위 클릭은 유지.
   document.addEventListener('pointerdown', (e) => {
     if (selectedStickerId && !e.target.closest('.sticker')) { selectedStickerId = null; markStickerSelection(); }
+  });
+  // 홈 빠른 액세스 카드: 카드 바깥을 누르면 선택(강조) 해제
+  document.addEventListener('pointerdown', (e) => {
+    if (homeSelectedIdx >= 0 && !e.target.closest('.home-card')) {
+      homeSelectedIdx = -1;
+      document.querySelectorAll('#home-grid .home-card.selected').forEach((n) => n.classList.remove('selected'));
+    }
   });
   // 창 크기가 바뀌면 위치는 CSS(%)가 알아서 따라가고, 툴바 위/아래(잘림 방지) 방향만 다시 판정
   let stickerResizeTO = null;
