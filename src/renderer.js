@@ -658,10 +658,10 @@ function applyGlassCss() {
   if (prefs.backgroundMaterial === 'frost') {
     root.classList.add('glass-frost');
     const op = clampInt(prefs.windowOpacity, 15, 100, 100);
-    const fog = clampInt(prefs.blurIntensity, 0, 100, 30); // 흐림(프로스트) 강도 = '블러 강도' 슬라이더
-    r.setProperty('--bg-opaque', Math.max(Math.round(op * 0.5), 30) + '%');      // 밀키 베이스
-    r.setProperty('--surface-opaque', Math.max(Math.round(op * 0.7), 55) + '%'); // 표면
-    r.setProperty('--frost-veil', (15 + Math.round(fog * 0.8)) + '%');           // 15~95% 흰 막(흐림 강도, 100=거의 꽉 참)
+    const fog = clampInt(prefs.blurIntensity, 0, 100, 30); // 프로스트 강도 = '블러 강도' 슬라이더
+    r.setProperty('--bg-opaque', Math.max(Math.round(op * 0.4), 18) + '%');       // 반투명 → 바탕 배어나옴(유리감)
+    r.setProperty('--surface-opaque', Math.max(Math.round(op * 0.65), 48) + '%');
+    r.setProperty('--frost-veil', (8 + Math.round(fog * 0.45)) + '%');            // 8~53% 가벼운 흰 유리(그레인+반투명으로 아크릴풍)
     r.setProperty('--glass-blur', '0px');
     return;
   }
