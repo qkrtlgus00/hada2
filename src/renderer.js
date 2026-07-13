@@ -328,8 +328,24 @@ function clampInt(v, min, max, dflt) {
 const DEADLINE_HOUR = 9;               // 마감 알림 시각 (전날/당일 09:00)
 const LATE_WINDOW_MS = 60 * 60 * 1000; // 놓친 알림을 1시간까지는 늦게라도 발송
 
-// 중복 방지 키 — 현재 필드로 재계산하므로 일정을 수정/이동하면 자동으로 다시 알림
+// 중복 방지 키 — 현재 필드로 재계산 (수정/이동 시 새 키). 과거로 바뀐 알림은 disarm으로 무음 처리.
 function eventRemindKey(ev) { return `ev:${ev.id}|${ev.date}T${ev.start}|${ev.remindMin}`; }
+function workRemindKey(w, slot) { return `dl:${w.id}|${w.due}|${slot}`; }
+// 방금 만들거나 수정한 항목의 '이미 지난' 알림을 발송기록에 표시(무음) → 재발송 방지.
+// 미래로 재설정하면 새 키가 미표시 상태라 정상적으로 그 시각에 1회 울림.
+function disarmPastEventReminder(ev) {
+  if (!ev) return;
+  const at = eventRemindAt(ev);
+  if (at != null && at <= Date.now()) firedReminders[eventRemindKey(ev)] = Date.now();
+}
+function disarmPastWorkReminders(w) {
+  if (!w || !w.due) return;
+  const now = Date.now();
+  for (const slot of ['D1', 'D0']) {
+    const at = deadlineRemindAt(w.due, slot);
+    if (Number.isFinite(at) && at <= now) firedReminders[workRemindKey(w, slot)] = now;
+  }
+}
 // 이벤트 알림 시각(epoch ms). remindMin 없으면 null (로컬 시간 기준)
 function eventRemindAt(ev) {
   if (ev.remindMin == null || ev.remindMin === '') return null;
@@ -360,8 +376,8 @@ function dueReminders(evs, dls, fired, now, notifyDl) {
   if (notifyDl) {
     for (const dl of dls || []) {
       if (!dl.due || dl.status === '완료') continue;
-      push(`dl:${dl.id}|${dl.due}|D1`, deadlineRemindAt(dl.due, 'D1'), '마감 알림', `내일 마감: ${dl.title} (${dl.due})`);
-      push(`dl:${dl.id}|${dl.due}|D0`, deadlineRemindAt(dl.due, 'D0'), '마감 알림', `오늘 마감: ${dl.title}`);
+      push(workRemindKey(dl, 'D1'), deadlineRemindAt(dl.due, 'D1'), '마감 알림', `내일 마감: ${dl.title} (${dl.due})`);
+      push(workRemindKey(dl, 'D0'), deadlineRemindAt(dl.due, 'D0'), '마감 알림', `오늘 마감: ${dl.title}`);
     }
   }
   return out;
@@ -384,12 +400,15 @@ function scheduleSave() {
 // ---- CRUD ----
 function upsertEvent(data) {
   const now = new Date().toISOString();
+  let target;
   if (editingId) {
     const ev = events.find((e) => e.id === editingId);
-    if (ev) Object.assign(ev, data, { updatedAt: now });
+    if (ev) { Object.assign(ev, data, { updatedAt: now }); target = ev; }
   } else {
-    events.push({ id: crypto.randomUUID(), ...data, createdAt: now, updatedAt: now });
+    target = { id: crypto.randomUUID(), ...data, createdAt: now, updatedAt: now };
+    events.push(target);
   }
+  disarmPastEventReminder(target); // 과거 시각으로 만든/바꾼 알림은 다시 안 울리게
   scheduleSave();
   render();
 }
@@ -603,7 +622,7 @@ function applyGlassCss() {
   const base = clampInt(prefs.windowOpacity, 40, 100, 100);           // 40~100
   const extra = blurOn ? clampInt(prefs.blurIntensity, 0, 80, 30) : 0; // 추가 비침
   const bg = Math.max(base - extra, 22);                     // 페이지 여백: 하한 22%
-  const surface = Math.max(base - Math.round(extra * 0.5), 55); // 표면: 하한 55%(가독성)
+  const surface = Math.max(base - Math.round(extra * 0.5), 48); // 표면: 하한 48%(가독성은 text-shadow로 보호)
   const r = document.documentElement.style;
   r.setProperty('--bg-opaque', bg + '%');
   r.setProperty('--surface-opaque', surface + '%');
@@ -826,8 +845,12 @@ function setActiveNav(li) {
 // ---- 알림 ----
 function notifyToday() {
   const todayStr = ymd(new Date());
+  const key = 'today:' + todayStr;
+  if (firedReminders[key]) return; // 오늘 이미 요약 알림함 → 재시작/새로고침 시 중복 방지
   const todays = events.filter((e) => e.date === todayStr);
   if (todays.length === 0) return;
+  firedReminders[key] = Date.now();
+  scheduleSave();
   const first = [...todays].sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start))[0];
   window.api.notify('오늘 일정', `오늘 ${todays.length}개 · 첫 일정: ${first.title} ${fmt12(first.start)}`);
 }
@@ -1351,6 +1374,7 @@ function saveWorkModal() {
     amount: Number($('#w-amount').value) || 0,
     notes: $('#w-notes').value.trim(),
   });
+  disarmPastWorkReminders(w); // 과거 마감으로 바꾼 알림은 다시 안 울리게
   scheduleSave(); renderWorks(); closeWorkModal();
 }
 function deleteWorkModal() {
@@ -1863,6 +1887,8 @@ function bindUI() {
   const wTr = $('#w-transparent');
   if (wTr) wTr.addEventListener('change', () => {
     prefs.windowTransparent = wTr.checked; // 즉시 전환(재시작 불필요)
+    // 켤 때 투명도가 사실상 불투명이면 자동으로 낮춰 바로 비치게 (안 그러면 토글만으론 변화 없음)
+    if (wTr.checked && prefs.windowOpacity >= 95) prefs.windowOpacity = 80;
     applyGlassCss(); syncShellControls(); scheduleSave();
   });
   const wOp = $('#w-opacity');
@@ -1948,7 +1974,7 @@ function bindUI() {
     const title = $('#d-title').value.trim(); const due = $('#d-due').value;
     if (!title || !due) return;
     const status = $('#d-status').value;
-    works.push({
+    const w = {
       id: crypto.randomUUID(), title, due,
       client: $('#d-client').value.trim(),
       contact: $('#d-contact').value.trim(),
@@ -1957,7 +1983,9 @@ function bindUI() {
       amount: Number($('#d-amount').value) || 0,
       status, done: status === '완료',
       notes: $('#d-notes').value.trim(), progress: 0,
-    });
+    };
+    works.push(w);
+    disarmPastWorkReminders(w); // 과거 마감으로 만든 알림은 다시 안 울리게
     ['d-title', 'd-client', 'd-contact', 'd-platform', 'd-type', 'd-amount', 'd-due', 'd-notes'].forEach((id) => { $('#' + id).value = ''; });
     scheduleSave(); renderWorks();
   });
