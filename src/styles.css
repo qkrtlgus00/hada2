@@ -1013,6 +1013,7 @@ body.reordering { cursor: grabbing; user-select: none; }
   background: var(--panel); box-shadow: var(--shadow); white-space: nowrap;
 }
 .sticker:hover .sticker-tools { display: flex; }
+.sticker-tools.below { top: calc(100% + 6px); } /* 스티커가 위쪽이면 툴바를 아래로 (잘림 방지) */
 .st-btn {
   border: 1px solid var(--border-2); background: var(--panel); color: var(--text);
   border-radius: 6px; padding: 2px 7px; font-size: 11.5px; font-family: inherit; cursor: pointer; line-height: 1.4;

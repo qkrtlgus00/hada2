@@ -1932,6 +1932,7 @@ function renderStickers() {
       tools.appendChild(mkBtn('×', '삭제', () => { stickers = stickers.filter((x) => x.id !== s.id); scheduleSave(); renderStickers(); }));
     }
     el.appendChild(tools);
+    if ((s.y || 0) < 40) tools.classList.add('below'); // 위쪽이면 툴바를 아래로 (잘림 방지)
 
     if (!locked) {
       // 크기 조절 핸들 (우하단)
@@ -1977,6 +1978,7 @@ function renderStickers() {
         s.x = Math.max(0, ev.clientX - layerRect.left - offX);
         s.y = Math.max(0, ev.clientY - layerRect.top - offY);
         el.style.left = s.x + 'px'; el.style.top = s.y + 'px';
+        tools.classList.toggle('below', s.y < 40); // 위/아래로 끌 때 툴바 위치 실시간 전환
       };
       const up = () => {
         el.classList.remove('dragging');
