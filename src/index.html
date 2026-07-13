@@ -30,10 +30,13 @@
     <aside class="sidebar">
       <div class="sidebar-top">
         <div class="brand">
+          <span class="brand-logo" id="brand-logo">하</span>
           <strong class="brand-title" id="brand-title">하다</strong>
         </div>
         <button class="icon-btn ghost" id="sidebar-collapse" title="사이드바" aria-label="사이드바"><span class="ico" data-icon="panel"></span></button>
       </div>
+
+      <button class="sb-new" id="sb-new"><span class="ico" data-icon="plus"></span><span class="sb-new-label" id="sb-new-label">새로 만들기</span></button>
 
       <nav class="side-nav">
         <p class="nav-label">주 메뉴</p>
@@ -44,6 +47,7 @@
           <li data-nav data-target="deadlines"><span class="ico" data-icon="clock"></span><span>작업 관리</span></li>
           <li data-nav data-target="notes"><span class="ico" data-icon="note"></span><span>메모</span></li>
           <li data-nav data-target="youtube"><span class="ico" data-icon="music"></span><span>음악</span></li>
+          <li data-nav data-target="files"><span class="ico" data-icon="folder"></span><span>파일</span></li>
         </ul>
 
         <p class="nav-label">기타</p>
@@ -51,6 +55,12 @@
           <li data-nav id="nav-settings"><span class="ico" data-icon="gear"></span><span>설정</span></li>
         </ul>
       </nav>
+
+      <div class="sidebar-foot" id="sidebar-foot">
+        <p class="nav-label">오늘 요약</p>
+        <div class="sb-stat"><span class="ico" data-icon="check"></span><span class="sb-stat-label">남은 할 일</span><b id="sb-stat-todo">0</b></div>
+        <div class="sb-stat"><span class="ico" data-icon="clock"></span><span class="sb-stat-label">다가오는 마감</span><b id="sb-stat-due">0</b></div>
+      </div>
     </aside>
 
     <!-- ============ 메인 ============ -->
@@ -153,7 +163,10 @@
             <button class="soft-btn" id="banner-clear" hidden>제거</button>
           </div>
         </div>
-        <h1 class="view-title">홈</h1>
+        <div class="section-head">
+          <p class="section-label">빠른 액세스</p>
+          <span class="section-chevron">›</span>
+        </div>
         <div class="home-grid" id="home-grid"></div>
       </section>
 
@@ -238,6 +251,39 @@
           <button type="submit" class="add-btn">추가</button>
         </form>
         <div class="yt-list" id="yt-list"></div>
+      </section>
+
+      <!-- ============ 파일 (내 컴퓨터 폴더 탐색, Google Drive 스타일) ============ -->
+      <section class="files-view" data-view="files" id="files-view" hidden>
+        <div class="files-header">
+          <div class="files-title">
+            <h1 class="view-title">파일</h1>
+          </div>
+          <div class="header-right">
+            <button class="soft-btn" id="files-up">↑ 상위로</button>
+            <button class="add-btn" id="files-pick">폴더 선택</button>
+          </div>
+        </div>
+        <div class="files-path" id="files-path">폴더를 선택하세요</div>
+        <div class="files-scroll">
+          <div class="files-section" id="quick-access-wrap" hidden>
+            <p class="files-section-label">빠른 액세스</p>
+            <div class="quick-access" id="quick-access"></div>
+          </div>
+          <div class="files-section">
+            <p class="files-section-label">모든 파일</p>
+            <div class="file-table">
+              <div class="file-row file-head">
+                <span class="fc-name">이름</span>
+                <span class="fc-kind">종류</span>
+                <span class="fc-date">수정한 날짜</span>
+                <span class="fc-size">크기</span>
+              </div>
+              <div id="file-list"></div>
+            </div>
+            <div class="files-empty" id="files-empty" hidden>이 폴더에 항목이 없어요.</div>
+          </div>
+        </div>
       </section>
 
       <!-- 준비 중 기능 안내 패널 (사이드바 메뉴 클릭 시) -->

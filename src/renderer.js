@@ -146,9 +146,36 @@ function formatSize(bytes) {
   const s = (n >= 100 || i === 0) ? Math.round(n) : n.toFixed(1);
   return `${s} ${u[i]}`;
 }
-// 파일/폴더 라인 아이콘 SVG 반환 (이모지 대신)
+// 파일 확장자 → 색 (구글 드라이브풍: 문서=파랑, 시트=초록, PDF=빨강, 이미지=주황 …)
+function fileColor(ext) {
+  const e = String(ext || '').toLowerCase();
+  if (['doc', 'docx', 'hwp', 'txt', 'rtf', 'odt', 'md'].includes(e)) return '#4285f4';
+  if (['xls', 'xlsx', 'csv', 'ods'].includes(e)) return '#34a853';
+  if (['ppt', 'pptx', 'odp', 'key'].includes(e)) return '#ff6d00';
+  if (e === 'pdf') return '#ea4335';
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'heic'].includes(e)) return '#f4b400';
+  if (['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(e)) return '#e5487f';
+  if (['mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg'].includes(e)) return '#8b5cf6';
+  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(e)) return '#b0862f';
+  return '#8a93a6';
+}
+// 확장자 → 타입 글리프 키
+function fileTypeGlyph(ext, isDir) {
+  if (isDir) return 'folder';
+  const e = String(ext || '').toLowerCase();
+  if (['doc', 'docx', 'hwp', 'txt', 'rtf', 'odt', 'md'].includes(e)) return 'fdoc';
+  if (['xls', 'xlsx', 'csv', 'ods'].includes(e)) return 'fsheet';
+  if (['ppt', 'pptx', 'odp', 'key'].includes(e)) return 'fslide';
+  if (e === 'pdf') return 'fpdf';
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'heic'].includes(e)) return 'fimage';
+  if (['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(e)) return 'fvideo';
+  if (['mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg'].includes(e)) return 'music';
+  return 'file';
+}
+// 색깔 파일 타입 아이콘 (라인 아이콘을 타입 색으로) — 폴더는 파랑
 function fileIcon(ext, isDir) {
-  return icon(isDir ? 'folder' : 'file');
+  const color = isDir ? '#4285f4' : fileColor(ext);
+  return `<span class="file-ico" style="color:${color}">${icon(fileTypeGlyph(ext, isDir))}</span>`;
 }
 function kindLabel(ext, isDir) {
   if (isDir) return '폴더';
@@ -202,6 +229,13 @@ const ICONS = {
   play: '<path d="M7 5l12 7-12 7z"/>',
   panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
   sticker: '<path d="M4 4h10a6 6 0 0 1 6 6v0l-10 10H4z"/><path d="M14 20a6 6 0 0 0 6-6h-4a2 2 0 0 0-2 2z"/>',
+  // 파일 타입 글리프 (fileIcon이 타입 색으로 렌더)
+  fdoc: '<path d="M6 3h8l4 4v14H6z"/><path d="M13 3v5h5"/><path d="M9 12h6M9 15h6M9 18h4"/>',
+  fsheet: '<rect x="4" y="3.5" width="16" height="17" rx="1.5"/><path d="M4 9h16M4 14.5h16M10 3.5v17M15 3.5v17"/>',
+  fslide: '<rect x="3" y="5" width="18" height="12" rx="1.5"/><path d="M12 17v3M9 21h6"/>',
+  fpdf: '<path d="M6 3h8l4 4v14H6z"/><path d="M13 3v5h5"/><path d="M9 14h5M9 17h3"/>',
+  fimage: '<rect x="3" y="4.5" width="18" height="15" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="M21 16l-5-5-4 4-2-2-4 4"/>',
+  fvideo: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9l5 3-5 3z"/>',
 };
 function icon(name) {
   const p = ICONS[name];
@@ -742,14 +776,14 @@ function toast(msg) {
 // 탭(뷰)마다 고유 색 — 활성 탭과 그 페이지 상단이 같은 색으로 켜져 "연결된" 느낌
 const VIEW_COLORS = {
   home: '#5b6cff', calendar: '#2f9e6b', ledger: '#e08a1e', deadlines: '#e5484d',
-  notes: '#0ea5a4', youtube: '#e5487f',
+  notes: '#0ea5a4', youtube: '#e5487f', files: '#1a73e8',
 };
 // 설정에서 뷰 색을 노출할 항목 (라벨)
 const VIEW_META = [
   { view: 'home', label: '홈' }, { view: 'calendar', label: '일정' },
   { view: 'ledger', label: '가계부' }, { view: 'deadlines', label: '작업 관리' },
   { view: 'notes', label: '메모' },
-  { view: 'youtube', label: '음악' },
+  { view: 'youtube', label: '음악' }, { view: 'files', label: '파일' },
 ];
 // 뷰 강조색: 사용자 지정(prefs.viewColors) 우선, 없으면 기본 VIEW_COLORS
 function viewAccent(view) {
@@ -763,7 +797,34 @@ function setView(view) {
   // 뷰 색을 CSS 변수로 주입 (사이드바 활성 탭 + 페이지 상단이 이 색을 공유)
   const accent = viewAccent(view);
   document.documentElement.style.setProperty('--view-accent', accent);
+  updateSbNewLabel(view);
+  renderSidebarStats();
   renderStickers();
+}
+// 사이드바 "새로 만들기" 라벨을 현재 뷰에 맞춤
+const SB_NEW_LABEL = {
+  calendar: '일정 추가', home: '일정 추가', ledger: '내역 추가', deadlines: '작업 추가',
+  notes: '새 메모', youtube: '노래 추가', files: '폴더 열기',
+};
+function updateSbNewLabel(view) {
+  const el = $('#sb-new-label'); if (el) el.textContent = SB_NEW_LABEL[view] || '새로 만들기';
+}
+// 사이드바 "새로 만들기" — 현재 뷰의 주요 추가 동작
+function primaryAdd() {
+  switch (currentView) {
+    case 'ledger': { const el = $('#l-amount'); if (el) el.focus(); break; }
+    case 'deadlines': { const el = $('#d-title'); if (el) el.focus(); break; }
+    case 'notes': addNote(); break;
+    case 'youtube': { const el = $('#yt-url'); if (el) el.focus(); break; }
+    case 'files': pickFolder(); break;
+    default: openModal(null); // calendar/home 등
+  }
+}
+// 사이드바 하단 요약(남은 할 일 / 다가오는 마감)
+function renderSidebarStats() {
+  const today = ymd(new Date());
+  const t = $('#sb-stat-todo'); if (t) t.textContent = String(todos.filter((x) => !x.done).length);
+  const d = $('#sb-stat-due'); if (d) d.textContent = String(works.filter((w) => w.status !== '완료' && w.due).length);
 }
 // 상단 검색: 현재 화면 목록을 질의어로 필터 (캘린더는 render()가 searchText를 이미 반영)
 const SEARCH_ROW_SEL = '.ledger-row, .deadline-row, .note-card, .yt-row';
@@ -923,7 +984,7 @@ function renderFiles(r) {
 
 // ---- 색상 사용자 지정 ----
 const COLOR_PRESETS = [
-  { name: '기본', accent: '#14161f', sidebar: '#f3f4f8' },
+  { name: '기본(드라이브)', accent: '#1a73e8', sidebar: '#2f66dc' },
   { name: '드라이브 블루', accent: '#1a73e8', sidebar: '#1b64da' },
   { name: '퍼플', accent: '#6b46e5', sidebar: '#f2effe' },
   { name: '그린', accent: '#2f9e6b', sidebar: '#eaf6ef' },
@@ -1074,6 +1135,7 @@ function applyTitle(str) {
   const bt = $('#brand-title'); if (bt) bt.textContent = t;
   const ch = $('#crumb-home'); if (ch) ch.textContent = t;
   const un = $('#user-name'); if (un) un.textContent = t;
+  const lg = $('#brand-logo'); if (lg) lg.textContent = [...t][0] || '하';
   prefs.appTitle = t;
   try { localStorage.setItem('appTitle', t); } catch (_) {}
 }
@@ -1113,6 +1175,7 @@ function renderTodos() {
     del.addEventListener('click', () => { todos = todos.filter((x) => x.id !== t.id); scheduleSave(); renderTodos(); });
     li.append(cb, sp, del); list.appendChild(li);
   }
+  renderSidebarStats();
 }
 
 // ---- 반복 목록 ----
@@ -1242,16 +1305,16 @@ function renderHome() {
     { ic: 'check', label: '오늘 습관', value: habits.length ? `${habitsToday}/${habits.length}` : '없음', view: 'habits' },
   ];
   grid.innerHTML = '';
-  for (const c of cards) {
+  cards.forEach((c, i) => {
     const el = document.createElement('button');
-    el.className = 'home-card';
+    el.className = 'home-card' + (i === 0 ? ' feature' : ''); // 첫 카드는 강조색 채움(참고 이미지)
     el.innerHTML = '<div class="hc-icon"></div><div class="hc-label"></div><div class="hc-value"></div>';
     el.querySelector('.hc-icon').innerHTML = icon(c.ic);
     el.querySelector('.hc-label').textContent = c.label;
     el.querySelector('.hc-value').textContent = c.value;
     el.addEventListener('click', () => activateNavByTarget(c.view));
     grid.appendChild(el);
-  }
+  });
 }
 
 // ---- 가계부 ----
@@ -1268,12 +1331,22 @@ function renderLedger() {
   let items = ledger.filter((it) => monthKey(it.date) === ym);
   if (!prefs.manual.ledger) items = items.sort((a, b) => b.date.localeCompare(a.date));
   if (!items.length) { list.innerHTML = '<div class="empty-hint">이 달 내역이 없어요.</div>'; return; }
+  // 표 헤더 행 (참고의 ALL FILES 헤더)
+  const head = document.createElement('div');
+  head.className = 'ledger-row ledger-head';
+  head.innerHTML = '<span></span><span class="lr-date">날짜</span><span class="lr-cat">분류</span><span class="lr-memo">메모</span><span class="lr-amt">금액</span><span></span>';
+  list.appendChild(head);
   for (const it of items) {
     const row = document.createElement('div');
     row.className = 'ledger-row ' + it.type;
     row.dataset.id = it.id;
     const mk = (cls, txt) => { const s2 = document.createElement('span'); s2.className = cls; s2.textContent = txt; return s2; };
+    const ico = document.createElement('span');
+    ico.className = 'file-ico lr-ico';
+    ico.style.color = it.type === 'income' ? '#34a853' : '#ea4335';
+    ico.innerHTML = icon('wallet');
     row.append(
+      ico,
       mk('lr-date', it.date.slice(5)),
       mk('lr-cat', it.category || (it.type === 'income' ? '수입' : '지출')),
       mk('lr-memo', it.memo || ''),
@@ -1367,6 +1440,7 @@ function renderWorks() {
     list.appendChild(row);
   }
   filterCurrentRows();
+  renderSidebarStats();
 }
 
 // ---- 작업 항목 편집 모달 (메모 포함 전체 필드) ----
@@ -2057,6 +2131,9 @@ function bindUI() {
   document.querySelector('.brand').addEventListener('click', () => {
     if (sidebar.classList.contains('collapsed')) toggleSidebar();
   });
+  const sbNew = $('#sb-new'); if (sbNew) sbNew.addEventListener('click', primaryAdd);
+  const fPick = $('#files-pick'); if (fPick) fPick.addEventListener('click', pickFolder);
+  const fUp = $('#files-up'); if (fUp) fUp.addEventListener('click', goUpFolder);
 
   $('#theme-toggle').addEventListener('click', () => {
     const cur = document.documentElement.getAttribute('data-theme');
@@ -2106,7 +2183,17 @@ async function init() {
   prefs.blurIntensity = clampInt(p.blurIntensity, 0, 80, 30);
   prefs.uiScale = clampInt(p.uiScale, 80, 150, 100);
   prefs.notifyDeadlines = (typeof p.notifyDeadlines === 'boolean') ? p.notifyDeadlines : true;
+  prefs.uiRevamp = p.uiRevamp || '';
   firedReminders = (data && data.firedReminders && typeof data.firedReminders === 'object') ? data.firedReminders : {};
+
+  // Google Drive 리스킨 1회 적용: 저장된 커스텀 색을 새 기본 룩(:root 블루)으로 교체.
+  // 이후 사용자가 다시 색을 지정하면 그 값 유지(플래그로 1회만).
+  if (prefs.uiRevamp !== 'drive') {
+    prefs.colors = {};
+    prefs.uiRevamp = 'drive';
+    try { localStorage.removeItem('colors'); } catch (_) {}
+    scheduleSave();
+  }
 
   colors = prefs.colors;
   applyTheme(prefs.theme);
