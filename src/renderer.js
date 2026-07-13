@@ -48,6 +48,7 @@ let prefs = {
   windowOpacity: 100, backgroundMaterial: 'none', blurIntensity: 30, uiScale: 100,
   windowTransparent: false, // 기본 불투명(솔리드). 켜면 바탕화면 비침
   notifyDeadlines: true,
+  deadlineNotifyTime: '09:00', // 마감 알림 시각(HH:MM) — 전날·당일 이 시각에
   hideStickerTools: false, // 켜면 스티커 클릭 시 버튼 툴바(잠금·투명·앞·뒤·×) 안 뜸
   manual: { ledger: false, works: false },
 };
@@ -369,12 +370,15 @@ function eventRemindAt(ev) {
   if (!Number.isFinite(t)) return null;
   return t - Number(ev.remindMin) * 60000;
 }
-// 마감 알림 시각: slot 'D1'=전날 09:00, 'D0'=당일 09:00
+// 마감 알림 시각: slot 'D1'=전날, 'D0'=당일. 시각은 설정(prefs.deadlineNotifyTime, 기본 09:00).
 function deadlineRemindAt(due, slot) {
   const d = new Date(`${due}T00:00:00`);
   if (Number.isNaN(d.getTime())) return NaN;
   if (slot === 'D1') d.setDate(d.getDate() - 1);
-  d.setHours(DEADLINE_HOUR, 0, 0, 0);
+  const t = /^(\d{1,2}):(\d{2})$/.exec(prefs && prefs.deadlineNotifyTime);
+  const h = t ? Math.min(23, Number(t[1])) : DEADLINE_HOUR;
+  const m = t ? Math.min(59, Number(t[2])) : 0;
+  d.setHours(h, m, 0, 0);
   return d.getTime();
 }
 // 지금 울려야 할 알림 목록 (순수). silent=true 는 "너무 늦음 → 발송 없이 기록만"
@@ -688,6 +692,7 @@ function syncShellControls() {
     b.title = unsupported ? 'Windows 11(22H2 이상)에서만 지원돼요.' : '';
   });
   const dn = $('#pref-deadline-notify'); if (dn) dn.checked = prefs.notifyDeadlines !== false;
+  const dt = $('#pref-deadline-time'); if (dt) dt.value = prefs.deadlineNotifyTime || '09:00';
   const hst = $('#pref-hide-sticker-tools'); if (hst) hst.checked = !!prefs.hideStickerTools;
 }
 
@@ -2082,6 +2087,7 @@ async function importData() {
     prefs.windowTransparent = (typeof prefs.windowTransparent === 'boolean') ? prefs.windowTransparent : false;
     prefs.notifyDeadlines = (typeof prefs.notifyDeadlines === 'boolean') ? prefs.notifyDeadlines : true;
     prefs.hideStickerTools = (typeof prefs.hideStickerTools === 'boolean') ? prefs.hideStickerTools : false;
+    prefs.deadlineNotifyTime = /^([01]?\d|2[0-3]):[0-5]\d$/.test(prefs.deadlineNotifyTime) ? prefs.deadlineNotifyTime : '09:00';
     // 수동 정렬 플래그: 구형 deadlines/commissions → works 로 병합
     const m = (prefs.manual && typeof prefs.manual === 'object') ? prefs.manual : {};
     prefs.manual = { ledger: !!m.ledger, works: !!(m.works || m.deadlines || m.commissions) };
@@ -2228,9 +2234,11 @@ function bindUI() {
     if (window.api.win) window.api.win.setUiScale(prefs.uiScale);
     scheduleSave();
   });
-  // 마감 자동 알림 토글
+  // 마감 자동 알림 토글 + 알림 시각
   const dn = $('#pref-deadline-notify');
   if (dn) dn.addEventListener('change', () => { prefs.notifyDeadlines = dn.checked; scheduleSave(); });
+  const dt = $('#pref-deadline-time');
+  if (dt) dt.addEventListener('change', () => { if (/^([01]?\d|2[0-3]):[0-5]\d$/.test(dt.value)) { prefs.deadlineNotifyTime = dt.value; scheduleSave(); } });
   // 스티커 버튼 툴바 숨기기 토글
   const hst = $('#pref-hide-sticker-tools');
   if (hst) hst.addEventListener('change', () => { prefs.hideStickerTools = hst.checked; document.body.classList.toggle('hide-sticker-tools', hst.checked); scheduleSave(); });
@@ -2478,6 +2486,7 @@ async function init() {
   prefs.windowTransparent = (typeof p.windowTransparent === 'boolean') ? p.windowTransparent : false;
   prefs.notifyDeadlines = (typeof p.notifyDeadlines === 'boolean') ? p.notifyDeadlines : true;
   prefs.hideStickerTools = (typeof p.hideStickerTools === 'boolean') ? p.hideStickerTools : false;
+  prefs.deadlineNotifyTime = /^([01]?\d|2[0-3]):[0-5]\d$/.test(p.deadlineNotifyTime) ? p.deadlineNotifyTime : '09:00';
   prefs.uiRevamp = p.uiRevamp || '';
   firedReminders = (data && data.firedReminders && typeof data.firedReminders === 'object') ? data.firedReminders : {};
 
