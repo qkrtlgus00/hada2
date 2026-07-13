@@ -186,6 +186,7 @@
           </div>
         </div>
         <div class="ledger-summary" id="ledger-summary"></div>
+        <div class="ledger-stats" id="ledger-stats" hidden></div>
         <form id="ledger-form" class="ledger-form" autocomplete="off">
           <div class="seg-toggle" id="l-type-toggle">
             <button type="button" class="seg-btn income" data-t="income">수입</button>
@@ -548,6 +549,10 @@
           </label>
           <label class="field"><span>마감</span><input id="w-due" type="date" required /></label>
         </div>
+        <label class="field-check">
+          <input id="w-paid" type="checkbox" />
+          <span>입금완료 <em>— 체크하면 금액을 가계부 ‘수입’으로 자동 기록</em></span>
+        </label>
         <label class="field">
           <span>메모</span>
           <textarea id="w-notes" rows="3" placeholder="메모 (선택)"></textarea>

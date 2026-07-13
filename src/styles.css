@@ -581,6 +581,9 @@ body.is-max #tb-max .i-restore { display: block; }
 .field input:focus, .field textarea:focus { outline: 2px solid var(--primary); outline-offset: 0; }
 .field-row { display: flex; gap: 10px; }
 .field-row .field { flex: 1; }
+.field-check { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.field-check input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--primary); flex: 0 0 auto; cursor: pointer; }
+.field-check em { font-style: normal; font-size: 11.5px; color: var(--text-mute); }
 .field.grow { flex: 2; }
 .check-field { justify-content: flex-start; }
 
@@ -796,6 +799,22 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
 .lsum strong { display: block; font-size: 18px; margin-top: 4px; }
 .lsum.income strong { color: var(--success); }
 .lsum.expense strong { color: var(--danger); }
+/* 카테고리별 지출 통계 (도넛 + 막대) */
+.ledger-stats { background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; }
+.lstat-head { font-size: 12.5px; font-weight: 700; color: var(--text-dim); margin-bottom: 12px; }
+.lstat-body { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.lstat-donut { position: relative; width: 116px; height: 116px; border-radius: 50%; flex: 0 0 auto; }
+.lstat-hole { position: absolute; inset: 24px; background: var(--panel-2); border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+.lstat-hole span { font-size: 10.5px; color: var(--text-mute); }
+.lstat-hole strong { font-size: 13.5px; }
+.lstat-rows { flex: 1 1 220px; min-width: 200px; display: flex; flex-direction: column; gap: 8px; }
+.lstat-row { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
+.lstat-name { flex: 0 0 34%; max-width: 34%; display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.lstat-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+.lstat-bar { flex: 1; height: 8px; background: var(--border-2); border-radius: 999px; overflow: hidden; }
+.lstat-bar-fill { display: block; height: 100%; border-radius: 999px; }
+.lstat-amt { flex: 0 0 auto; color: var(--text-dim); white-space: nowrap; }
+.lstat-amt em { font-style: normal; color: var(--text-mute); margin-left: 2px; }
 .ledger-form, .deadline-form { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
 .ledger-form input, .deadline-form input {
   background: var(--panel-2); border: 1px solid var(--border-2); color: var(--text);
@@ -840,6 +859,8 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
 .dl-badge.overdue { background: rgba(229,72,77,.14); color: var(--danger); }
 .dl-badge.today { background: rgba(255,138,0,.16); color: #d9730d; }
 .dl-badge.soon { background: rgba(91,108,255,.14); color: var(--primary); }
+.dl-paid { flex: 0 0 auto; align-self: center; font-size: 11.5px; font-weight: 700; border: 1px solid var(--border-2); border-radius: 999px; padding: 3px 10px; background: var(--panel-2); color: var(--text-mute); cursor: pointer; font-family: inherit; white-space: nowrap; }
+.dl-paid.on { background: rgba(47,158,107,.16); color: #2f9e6b; border-color: transparent; }
 
 /* ===== 메모 ===== */
 .notes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }

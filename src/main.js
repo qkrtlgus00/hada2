@@ -412,6 +412,18 @@ function ytPlayJs(vol) {
     "}catch(e){}},400);}" +
     "})();";
 }
+// oEmbed로 유튜브 영상 실제 제목 가져오기 (제목 자동 채우기용)
+ipcMain.handle('youtube:title', async (_e, url) => {
+  try {
+    if (typeof url !== 'string' || !/^https?:\/\//.test(url)) return { ok: false, error: 'BAD_URL' };
+    const oe = 'https://www.youtube.com/oembed?url=' + encodeURIComponent(url) + '&format=json';
+    const title = JSON.parse(await fetchText(oe)).title;
+    if (!title) return { ok: false, error: 'NO_TITLE' };
+    return { ok: true, title: String(title) };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+});
 ipcMain.handle('youtube:play', async (_e, url) => {
   if (typeof url !== 'string' || !/^https:\/\/(www\.)?youtube\.com\//.test(url)) {
     return { ok: false, error: 'BAD_URL' };

@@ -214,6 +214,8 @@ function migrateWork(w) {
     due: r.due || '',
     progress: Math.max(0, Math.min(100, Number(r.progress) || 0)),
     notes: (r.notes != null ? r.notes : r.memo) || '',
+    paid: !!r.paid,
+    ledgerId: r.ledgerId || '',
   };
 }
 // data(또는 백업)에서 작업 목록을 만든다. 신형 works 우선, 없으면 구형 deadlines+commissions 1회 병합.
@@ -296,6 +298,17 @@ function sumLedger(items, ym) {
     else expense += Number(it.amount) || 0;
   }
   return { income, expense, balance: income - expense };
+}
+// 그달 지출을 카테고리별로 합산 (내림차순). 빈 카테고리는 '기타'
+function sumByCategory(items, ym) {
+  const map = new Map();
+  for (const it of items || []) {
+    if (it.type !== 'expense') continue;
+    if (ym && monthKey(it.date) !== ym) continue;
+    const cat = (it.category && it.category.trim()) || '기타';
+    map.set(cat, (map.get(cat) || 0) + (Number(it.amount) || 0));
+  }
+  return [...map.entries()].map(([category, total]) => ({ category, total })).sort((a, b) => b.total - a.total);
 }
 // 마감까지 남은 일수(정수). 지났으면 음수.
 function daysUntil(dueYmd, todayYmd) {
@@ -1347,6 +1360,36 @@ function renderHome() {
 }
 
 // ---- 가계부 ----
+// 가계부 카테고리별 지출 통계 (도넛 + 막대). 라이브러리 없이 순수 CSS
+function renderLedgerStats(ym) {
+  const box = $('#ledger-stats'); if (!box) return;
+  const cats = sumByCategory(ledger, ym);
+  const total = cats.reduce((s, c) => s + c.total, 0);
+  if (!cats.length || total <= 0) { box.innerHTML = ''; box.hidden = true; return; }
+  box.hidden = false;
+  const max = cats[0].total;
+  let acc = 0;
+  const segs = cats.map((c) => {
+    const start = (acc / total) * 360; acc += c.total; const end = (acc / total) * 360;
+    return `${categoryColor(c.category)[1]} ${start}deg ${end}deg`;
+  }).join(', ');
+  const rows = cats.map((c) => {
+    const pct = Math.round((c.total / total) * 100);
+    const w = Math.max((c.total / max) * 100, 3);
+    const col = categoryColor(c.category)[1];
+    return `<div class="lstat-row">`
+      + `<span class="lstat-name"><i class="lstat-dot" style="background:${col}"></i>${textToHtml(c.category)}</span>`
+      + `<span class="lstat-bar"><span class="lstat-bar-fill" style="width:${w}%;background:${col}"></span></span>`
+      + `<span class="lstat-amt">${formatWon(c.total)} <em>${pct}%</em></span>`
+      + `</div>`;
+  }).join('');
+  box.innerHTML =
+    `<div class="lstat-head">이 달 지출 분석</div>`
+    + `<div class="lstat-body">`
+    + `<div class="lstat-donut" style="background:conic-gradient(${segs})"><div class="lstat-hole"><span>지출</span><strong>${formatWon(total)}</strong></div></div>`
+    + `<div class="lstat-rows">${rows}</div>`
+    + `</div>`;
+}
 function renderLedger() {
   const monthEl = $('#ledger-month');
   if (monthEl && !monthEl.value) monthEl.value = monthKey(ymd(new Date()));
@@ -1356,6 +1399,7 @@ function renderLedger() {
     `<div class="lsum income"><span>수입</span><strong>${formatWon(s.income)}</strong></div>` +
     `<div class="lsum expense"><span>지출</span><strong>${formatWon(s.expense)}</strong></div>` +
     `<div class="lsum balance"><span>잔액</span><strong>${formatWon(s.balance)}</strong></div>`;
+  renderLedgerStats(ym);
   const list = $('#ledger-list'); list.innerHTML = '';
   let items = ledger.filter((it) => monthKey(it.date) === ym);
   if (!prefs.manual.ledger) items = items.sort((a, b) => b.date.localeCompare(a.date));
@@ -1413,7 +1457,8 @@ function renderWorks() {
       `<div class="lsum"><span>진행중</span><strong>${cnt('진행중')}건</strong></div>` +
       `<div class="lsum income"><span>완료</span><strong>${cnt('완료')}건</strong></div>` +
       `<div class="lsum"><span>${label} 금액</span><strong>${formatWon(totalAll)}</strong></div>` +
-      `<div class="lsum"><span>미완료 금액</span><strong>${formatWon(totalOpen)}</strong></div>`;
+      `<div class="lsum"><span>미완료 금액</span><strong>${formatWon(totalOpen)}</strong></div>` +
+      `<div class="lsum"><span>미수금</span><strong>${formatWon(scope.filter((d) => !d.paid).reduce((s, d) => s + (Number(d.amount) || 0), 0))}</strong></div>`;
   }
 
   const items = prefs.manual.works ? [...scope] : [...scope].sort((a, b) =>
@@ -1465,11 +1510,41 @@ function renderWorks() {
     const badge = document.createElement('span'); badge.className = 'dl-badge ' + cls; badge.textContent = doneStatus ? '완료' : (n === null ? '' : ddayLabel(n));
     const del = document.createElement('button'); del.className = 'mini-del'; del.textContent = '×';
     del.addEventListener('click', () => { works = works.filter((x) => x.id !== it.id); scheduleSave(); renderWorks(); });
-    row.append(body, sel, badge, del);
+    row.append(body, sel);
+    if (Number(it.amount) > 0) {
+      const paidBtn = document.createElement('button');
+      paidBtn.type = 'button';
+      paidBtn.className = 'dl-paid' + (it.paid ? ' on' : '');
+      paidBtn.textContent = it.paid ? '입금완료' : '미수금';
+      paidBtn.title = '클릭하면 입금 상태 전환 (입금 시 가계부 수입 자동 기록)';
+      paidBtn.addEventListener('click', (e) => { e.stopPropagation(); setWorkPaid(it, !it.paid); });
+      row.append(paidBtn);
+    }
+    row.append(badge, del);
     list.appendChild(row);
   }
   filterCurrentRows();
   renderSidebarStats();
+}
+
+// 작업 입금 상태 토글 + 가계부 '수입' 자동 연동 (ledgerId로 중복 방지)
+function setWorkPaid(w, paid) {
+  if (!w) return;
+  const amt = Number(w.amount) || 0;
+  if (paid && amt > 0) {
+    const e = w.ledgerId ? ledger.find((x) => x.id === w.ledgerId) : null;
+    if (e) { e.amount = amt; e.memo = w.title || ''; } // 이미 연동됨 → 금액/메모 동기화
+    else {
+      const entry = { id: crypto.randomUUID(), date: ymd(new Date()), type: 'income', amount: amt, category: '작업 입금', memo: w.title || '' };
+      ledger.unshift(entry);
+      w.ledgerId = entry.id;
+    }
+  } else if (w.ledgerId) { // 미입금/금액0 → 연동된 수입 제거
+    ledger = ledger.filter((x) => x.id !== w.ledgerId);
+    w.ledgerId = '';
+  }
+  w.paid = !!paid;
+  scheduleSave(); renderWorks(); renderLedger();
 }
 
 // ---- 작업 항목 편집 모달 (메모 포함 전체 필드) ----
@@ -1487,6 +1562,7 @@ function openWorkModal(id) {
   $('#w-status').value = WORK_STATUS.includes(w.status) ? w.status : '대기';
   $('#w-due').value = w.due || '';
   $('#w-notes').value = w.notes || '';
+  const wp = $('#w-paid'); if (wp) wp.checked = !!w.paid;
   $('#work-modal').hidden = false;
   setTimeout(() => $('#w-title').focus(), 30);
 }
@@ -1507,7 +1583,8 @@ function saveWorkModal() {
     notes: $('#w-notes').value.trim(),
   });
   disarmPastWorkReminders(w); // 과거 마감으로 바꾼 알림은 다시 안 울리게
-  scheduleSave(); renderWorks(); closeWorkModal();
+  setWorkPaid(w, $('#w-paid') ? $('#w-paid').checked : !!w.paid); // 입금 상태 반영 + 가계부 연동 + 저장/렌더
+  closeWorkModal();
 }
 function deleteWorkModal() {
   if (editingWorkId && confirm('이 작업을 삭제할까요?')) {
@@ -2135,11 +2212,18 @@ function bindUI() {
       toast(p.listId ? '재생목록 링크는 지원하지 않아요. 재생목록 안의 개별 영상 링크를 넣어주세요.' : '유효한 유튜브 링크가 아니에요.');
       return;
     }
-    const t = { id: crypto.randomUUID(), title: $('#yt-title-in').value.trim() || url, url, videoId: p.videoId, listId: p.listId };
+    const manual = $('#yt-title-in').value.trim();
+    const t = { id: crypto.randomUUID(), title: manual || url, url, videoId: p.videoId, listId: p.listId };
     playlist.push(t);
     $('#yt-url').value = ''; $('#yt-title-in').value = '';
     scheduleSave(); renderYouTube();
     playTrack(t.id);
+    // 제목을 비웠으면 실제 영상 제목을 비동기로 채움 (재생은 기다리지 않음)
+    if (!manual && window.api.youtube && window.api.youtube.fetchTitle) {
+      window.api.youtube.fetchTitle(ytWatchUrl(t)).then((r) => {
+        if (r && r.ok && r.title && playlist.some((x) => x.id === t.id)) { t.title = r.title; scheduleSave(); renderYouTube(); }
+      }).catch(() => {});
+    }
   });
   const ytT = $('#yt-toggle'); if (ytT) ytT.addEventListener('click', ytToggle);
   const ytS = $('#yt-stop'); if (ytS) ytS.addEventListener('click', ytStop);
@@ -2339,7 +2423,7 @@ if (typeof module !== 'undefined' && module.exports) {
     startOfWeek, addDays, weekDates, ymd, timeToMinutes, minutesToLabel,
     fmt12, weekRangeLabel, minutesToTop, categoryColor, migrate,
     hexToRgb, luminance, idealText,
-    monthGrid, recurringDueToday, formatWon, monthKey, sumLedger,
+    monthGrid, recurringDueToday, formatWon, monthKey, sumLedger, sumByCategory,
     daysUntil, ddayLabel, computeStreak, icon, parseYouTube, textToHtml, migrateWork, loadWorks,
     mix, stripHtml, ytWatchUrl, nextTrackId, resolveNextId, reorderByIds, VIEW_COLORS, VIEW_META, viewAccent,
     clampInt, eventRemindKey, eventRemindAt, deadlineRemindAt, dueReminders,

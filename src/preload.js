@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld('api', {
     stop: () => ipcRenderer.invoke('youtube:stop'),
     /** 음량 (0~100) */
     setVolume: (v) => ipcRenderer.invoke('youtube:setVolume', v),
+    /** oEmbed로 영상 실제 제목 가져오기 (제목 자동 채우기) */
+    fetchTitle: (url) => ipcRenderer.invoke('youtube:title', url),
     /** 현재 곡 재생 종료 시 콜백 (다음 곡 자동재생용) */
     onEnded: (cb) => ipcRenderer.on('youtube:ended', () => cb()),
   },
