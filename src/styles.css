@@ -80,6 +80,26 @@ body {
 /* 불투명 모드·최대화 시 각진 모서리 (투명 모드에서만 둥근 코너) */
 :root.app-opaque body, body.is-max { border-radius: 0; }
 
+/* 투명 모드에서만 콘텐츠 카드 겉선(테두리) 제거 → 깔끔한 글래스.
+   불투명 모드/달력 그리드선/구분선/입력창(--border-2) 테두리는 그대로. */
+:root:not(.app-opaque) .main,
+:root:not(.app-opaque) .side-card,
+:root:not(.app-opaque) .home-card,
+:root:not(.app-opaque) .home-banner,
+:root:not(.app-opaque) .lsum,
+:root:not(.app-opaque) .ledger-stats,
+:root:not(.app-opaque) .deadline-row,
+:root:not(.app-opaque) .note-card,
+:root:not(.app-opaque) .habit-card,
+:root:not(.app-opaque) .yt-nowplaying,
+:root:not(.app-opaque) .yt-row,
+:root:not(.app-opaque) .vc-item,
+:root:not(.app-opaque) .mini-tag {
+  border-color: transparent;
+}
+:root:not(.app-opaque) .home-card:hover,
+:root:not(.app-opaque) .note-card:hover { border-color: transparent; }
+
 /* ===== 투명창 글자 가독성 보호 (반투명 표면 위 글자에 그림자) ===== */
 /* 사이드바 흰 글자: 어두운 그림자로 어떤 바탕화면에서도 또렷 */
 .brand-title, .nav-label, .side-nav li, .sb-stat, .sb-stat b, #titlebar {
