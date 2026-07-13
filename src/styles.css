@@ -100,7 +100,6 @@ body {
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.30);
 }
 .side-nav li.active { text-shadow: none; }   /* 흰 알약 위 어두운 글자엔 그림자 불필요 */
-.sb-new { text-shadow: none; }
 /* 본문에서 반투명 .main 위에 직접 놓인 글자: 밝은 그림자로 대비 확보 */
 .breadcrumb, .view-title, .section-label, .week-title h1, .day-head, .time-label {
   text-shadow: 0 1px 2px rgba(255, 255, 255, 0.55);
@@ -184,20 +183,6 @@ body.is-max #tb-max .i-restore { display: block; }
   box-shadow: 0 1px 3px rgba(0,0,0,.14);
 }
 
-/* 참고의 "Upload New File" 위치 — 흰 알약 주요 추가 버튼 */
-.sb-new {
-  display: flex; align-items: center; justify-content: center; gap: 8px;
-  margin: 2px 4px 6px;
-  padding: 10px 14px;
-  border: none; border-radius: 999px;
-  background: #fff; color: var(--accent);
-  font-family: inherit; font-size: 13.5px; font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0,0,0,.14);
-  transition: transform .08s, box-shadow .12s;
-}
-.sb-new:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,0,0,.2); }
-.sb-new .ico { color: var(--accent); }
 
 /* 하단 요약(참고 STORAGE DETAILS 대응) */
 .sidebar-foot { margin-top: auto; padding-top: 10px; }
@@ -524,6 +509,10 @@ body.is-max #tb-max .i-restore { display: block; }
 .event.compact { flex-direction: row; align-items: center; gap: 6px; padding: 4px 8px; }
 .event.compact .event-badge { display: none !important; }
 .event.event-dragging { z-index: 20; opacity: .92; box-shadow: 0 8px 24px rgba(24, 28, 48, 0.28); cursor: grabbing; transition: none; }
+/* 아래 가장자리 길이 조절 핸들 */
+.event-resize { position: absolute; left: 0; right: 0; bottom: 0; height: 8px; cursor: ns-resize; touch-action: none; display: none; }
+.event:hover .event-resize, .event.event-resizing .event-resize { display: block; }
+.event.event-resizing { z-index: 20; transition: none; }
 
 /* 현재 시각 라인 */
 .now-line {
@@ -617,12 +606,10 @@ body.is-max #tb-max .i-restore { display: block; }
 .sidebar.collapsed .side-nav li span,
 .sidebar.collapsed .nav-label,
 .sidebar.collapsed .account-info,
-.sidebar.collapsed .sb-new-label,
 .sidebar.collapsed .sb-stat-label,
 .sidebar.collapsed .sb-stat b,
 .sidebar.collapsed .badge { display: none; }
 .sidebar.collapsed .side-nav li { justify-content: center; }
-.sidebar.collapsed .sb-new { padding: 10px 0; }
 .sidebar.collapsed .sb-stat { justify-content: center; }
 .sidebar.collapsed .account-row { justify-content: center; }
 .sidebar.collapsed .sidebar-top { justify-content: center; }

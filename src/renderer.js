@@ -576,6 +576,7 @@ function renderDays() {
       node.querySelector('.event-time').textContent = `${fmt12(ev.start)} - ${fmt12(ev.end)}`;
       node.dataset.id = ev.id;
       node.addEventListener('click', (e) => { e.stopPropagation(); openModal(ev.id); });
+      const rz = document.createElement('div'); rz.className = 'event-resize'; rz.title = '드래그로 길이 조절'; node.appendChild(rz);
       col.appendChild(node);
     }
 
@@ -771,8 +772,9 @@ function enableEventDrag() {
   let timer = null, node = null, ev = null, dragging = false;
   let startX = 0, startY = 0, grabOffsetY = 0, durationM = 60, didDrag = false, lastDragEnd = 0;
   let dropMins = 0, dropColIdx = 0;
+  let resizing = false, startM = 0, dropEndMins = 0; // 아래 가장자리 길이 조절
   const clearTimer = () => { if (timer) { clearTimeout(timer); timer = null; } };
-  const reset = () => { clearTimer(); node = null; ev = null; dragging = false; didDrag = false; };
+  const reset = () => { clearTimer(); node = null; ev = null; dragging = false; didDrag = false; resizing = false; };
   const startDrag = (pid) => {
     if (!node) return;
     dragging = true;
@@ -787,6 +789,15 @@ function enableEventDrag() {
     const found = events.find((x) => x.id === target.dataset.id);
     if (!found) return;
     node = target; ev = found; dragging = false; didDrag = false;
+    // 아래 가장자리 핸들 → 즉시 길이 조절(롱프레스 없이)
+    if (e.target.closest('.event-resize')) {
+      resizing = true;
+      startM = timeToMinutes(ev.start);
+      dropEndMins = timeToMinutes(ev.end);
+      node.classList.add('event-resizing');
+      try { node.setPointerCapture(e.pointerId); } catch (_) {}
+      return;
+    }
     startX = e.clientX; startY = e.clientY;
     grabOffsetY = e.clientY - target.getBoundingClientRect().top;
     durationM = Math.max(timeToMinutes(ev.end) - timeToMinutes(ev.start), 20);
@@ -797,6 +808,15 @@ function enableEventDrag() {
     timer = setTimeout(() => startDrag(pid), 350);
   };
   const onMove = (e) => {
+    if (resizing) {
+      didDrag = true; e.preventDefault();
+      const colRect = node.parentElement.getBoundingClientRect();
+      let end = DAY_START * 60 + Math.round(((e.clientY - colRect.top) / HOUR_HEIGHT) * 60 / 15) * 15;
+      end = Math.max(startM + 20, Math.min(end, DAY_END * 60)); // 최소 20분, DAY_END 클램프
+      node.style.height = `${Math.max((end - startM) / 60 * HOUR_HEIGHT - 4, 20)}px`;
+      dropEndMins = end;
+      return;
+    }
     if (!dragging) {
       if (timer) {
         const dx = Math.abs(e.clientX - startX), dy = Math.abs(e.clientY - startY);
@@ -823,6 +843,20 @@ function enableEventDrag() {
   };
   const onUp = () => {
     clearTimer();
+    if (resizing) {
+      node.classList.remove('event-resizing');
+      if (didDrag && ev) {
+        const ne = minutesToLabel(dropEndMins);
+        if (ne !== ev.end) {
+          ev.end = ne; ev.updatedAt = new Date().toISOString();
+          disarmPastEventReminder(ev);
+          scheduleSave();
+        }
+        lastDragEnd = Date.now(); // 리사이즈 직후 click(수정모달) 억제
+        render();
+      }
+      reset(); return;
+    }
     if (dragging) {
       node.classList.remove('event-dragging');
       document.body.classList.remove('reordering');
@@ -892,27 +926,8 @@ function setView(view) {
   // 뷰 색을 CSS 변수로 주입 (사이드바 활성 탭 + 페이지 상단이 이 색을 공유)
   const accent = viewAccent(view);
   document.documentElement.style.setProperty('--view-accent', accent);
-  updateSbNewLabel(view);
   renderSidebarStats();
   renderStickers();
-}
-// 사이드바 "새로 만들기" 라벨을 현재 뷰에 맞춤
-const SB_NEW_LABEL = {
-  calendar: '일정 추가', home: '일정 추가', ledger: '내역 추가', deadlines: '작업 추가',
-  notes: '새 메모', youtube: '노래 추가',
-};
-function updateSbNewLabel(view) {
-  const el = $('#sb-new-label'); if (el) el.textContent = SB_NEW_LABEL[view] || '새로 만들기';
-}
-// 사이드바 "새로 만들기" — 현재 뷰의 주요 추가 동작
-function primaryAdd() {
-  switch (currentView) {
-    case 'ledger': { const el = $('#l-amount'); if (el) el.focus(); break; }
-    case 'deadlines': { const el = $('#d-title'); if (el) el.focus(); break; }
-    case 'notes': addNote(); break;
-    case 'youtube': { const el = $('#yt-url'); if (el) el.focus(); break; }
-    default: openModal(null); // calendar/home 등
-  }
 }
 // 사이드바 하단 요약(남은 할 일 / 다가오는 마감)
 function renderSidebarStats() {
@@ -2335,7 +2350,6 @@ function bindUI() {
   document.querySelector('.brand').addEventListener('click', () => {
     if (sidebar.classList.contains('collapsed')) toggleSidebar();
   });
-  const sbNew = $('#sb-new'); if (sbNew) sbNew.addEventListener('click', primaryAdd);
 
   $('#theme-toggle').addEventListener('click', () => {
     const cur = document.documentElement.getAttribute('data-theme');
