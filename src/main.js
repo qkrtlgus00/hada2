@@ -131,12 +131,6 @@ function startAppServer() {
         const filePath = path.normalize(path.join(root, urlPath));
         if (!filePath.startsWith(root)) { res.statusCode = 403; res.end('forbidden'); return; }
         res.setHeader('Content-Type', MIME[path.extname(filePath).toLowerCase()] || 'application/octet-stream');
-        // index.html: 저장된 테마를 <html>에 미리 주입 → 시작 시 테마 깜빡임(FOUC) 제거
-        if (filePath.toLowerCase().endsWith('index.html')) {
-          let html = await fsp.readFile(filePath, 'utf8');
-          if (bootShell.theme === 'dark') html = html.replace('<html lang="ko">', '<html lang="ko" data-theme="dark">');
-          res.end(html); return;
-        }
         const data = await fsp.readFile(filePath);
         res.end(data);
       } catch (_) { res.statusCode = 404; res.end('not found'); }
@@ -162,7 +156,7 @@ function startAppServer() {
 
 // ===== 창 셸 설정 (커스텀 타이틀바 / 투명도 / 블러 / 배율) =====
 // 창 생성 전에 data.json의 prefs에서 창 관련 값만 읽어 옵션에 반영 (시작 시 깜빡임 방지)
-let bootShell = { windowOpacity: 100, backgroundMaterial: 'none', uiScale: 100, theme: 'light' };
+let bootShell = { windowOpacity: 100, backgroundMaterial: 'none', uiScale: 100 };
 // 런타임 상태 — 투명도는 앱 내부(CSS)에서 처리하므로 여기선 블러 재질만 추적
 let shellState = { material: 'none' };
 
@@ -181,10 +175,9 @@ function sanitizeShellPrefs(p) {
   const o = (p && typeof p === 'object') ? p : {};
   const mat = ['none', 'mica', 'acrylic'].includes(o.backgroundMaterial) ? o.backgroundMaterial : 'none';
   return {
-    windowOpacity: clampInt(o.windowOpacity, 40, 100, 100),
+    windowOpacity: clampInt(o.windowOpacity, 15, 100, 100),
     backgroundMaterial: materialSupported() ? mat : 'none',
     uiScale: clampInt(o.uiScale, 80, 150, 100),
-    theme: o.theme === 'dark' ? 'dark' : 'light',
   };
 }
 // ===== 창 크기/위치 저장·복원 (data.json과 별도 파일로 경합 방지) =====

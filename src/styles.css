@@ -48,27 +48,6 @@
   --sidebar-active-bg: rgba(255, 255, 255, 0.14); /* hover 반투명 흰 */
 }
 
-:root[data-theme="dark"] {
-  --page-bg: #0f1016;
-  --page-bg-2: #0f1016;
-  --panel: #1a1c26;
-  --panel-2: #21242f;
-  --sidebar-bg: #16171f;
-  --sidebar-bg-2: #16171f;
-  --text: #e7e9f2;
-  --text-dim: #9297ac;
-  --text-mute: #6b7089;
-  --border: #262933;
-  --border-2: #2d313d;
-  --accent: #e7e9f2;
-  --primary: #8290ff;
-  --danger: #ff6b6f;
-  --success: #4fd39a;
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
-  --shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
-  /* 다크는 accent가 밝은 색이라 그 위 글자는 어둡게 (기본 흰색 override) */
-  --accent-text: #10131a;
-}
 
 * { box-sizing: border-box; }
 
@@ -1002,9 +981,10 @@ body.reordering { cursor: grabbing; user-select: none; }
 .sticker { position: absolute; pointer-events: auto; cursor: grab; user-select: none; transform-origin: center; }
 .sticker.dragging { cursor: grabbing; }
 .sticker.locked { cursor: default; }
+.sticker:hover, .sticker.selected { z-index: 60; } /* 겹쳐도 활성 스티커 툴바가 위로 */
 .sticker img { width: 100%; height: auto; display: block; pointer-events: none; -webkit-user-drag: none; }
-/* 편집 시 외곽선 힌트 */
-.sticker:hover { outline: 1.5px dashed color-mix(in srgb, var(--primary) 60%, transparent); outline-offset: 3px; }
+/* 편집 시 외곽선 힌트 (hover 또는 클릭 선택 시) */
+.sticker:hover, .sticker.selected { outline: 1.5px dashed color-mix(in srgb, var(--primary) 60%, transparent); outline-offset: 3px; }
 .sticker.locked:hover { outline-style: solid; outline-color: color-mix(in srgb, var(--text-mute) 60%, transparent); }
 /* 호버 툴바 (스티커 위) */
 .sticker-tools {
@@ -1012,8 +992,11 @@ body.reordering { cursor: grabbing; user-select: none; }
   display: none; gap: 4px; padding: 3px; border-radius: 8px;
   background: var(--panel); box-shadow: var(--shadow); white-space: nowrap;
 }
-.sticker:hover .sticker-tools { display: flex; }
+.sticker:hover .sticker-tools, .sticker.selected .sticker-tools { display: flex; }
 .sticker-tools.below { top: calc(100% + 6px); } /* 스티커가 위쪽이면 툴바를 아래로 (잘림 방지) */
+/* 스티커와 툴바 사이 ~6px 틈을 투명 브리지로 메워 hover가 끊기지 않게(버튼까지 마우스가 닿음) */
+.sticker-tools::after { content: ''; position: absolute; left: 0; right: 0; top: 100%; height: 10px; }
+.sticker-tools.below::after { top: auto; bottom: 100%; height: 10px; }
 .st-btn {
   border: 1px solid var(--border-2); background: var(--panel); color: var(--text);
   border-radius: 6px; padding: 2px 7px; font-size: 11.5px; font-family: inherit; cursor: pointer; line-height: 1.4;
@@ -1021,7 +1004,7 @@ body.reordering { cursor: grabbing; user-select: none; }
 .st-btn:hover { background: var(--panel-2); }
 /* 크기/회전 핸들 */
 .st-handle { position: absolute; display: none; background: var(--primary); border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
-.sticker:hover .st-handle { display: block; }
+.sticker:hover .st-handle, .sticker.selected .st-handle { display: block; }
 .st-resize { right: -7px; bottom: -7px; width: 14px; height: 14px; border-radius: 3px; cursor: nwse-resize; }
 .st-rot { left: -7px; top: -7px; width: 14px; height: 14px; border-radius: 50%; cursor: grab; }
 
