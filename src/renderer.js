@@ -272,15 +272,15 @@ function monthGrid(year, month /* 0-based */) {
   }
   return cells;
 }
-// 반복 항목이 오늘 체크 대상인지 (이미 오늘 완료했으면 false)
-function recurringDueToday(rule, lastDone, todayYmd) {
-  if (lastDone === todayYmd) return false;
-  const dow = new Date(todayYmd + 'T00:00:00').getDay(); // 0=일
+// 반복 항목이 특정 날짜에 대상인지. 지정 날짜(dates)가 있으면 그 날짜에만, 없으면 규칙대로.
+function recurringDueOn(rule, dates, dayYmd) {
+  if (dates && typeof dates === 'object' && Object.keys(dates).length) return !!dates[dayYmd];
+  const dow = new Date(dayYmd + 'T00:00:00').getDay(); // 0=일
   switch (rule) {
     case 'daily': return true;
     case 'weekday': return dow >= 1 && dow <= 5;
     case 'weekly': return dow === 1; // 매주 월요일 기준
-    case 'monthly': return Number(todayYmd.slice(8, 10)) === 1;
+    case 'monthly': return Number(dayYmd.slice(8, 10)) === 1;
     default: return true;
   }
 }
@@ -637,17 +637,19 @@ function applyGlassCss() {
     root.classList.add('app-opaque');
     root.style.setProperty('--bg-opaque', '100%');
     root.style.setProperty('--surface-opaque', '100%');
+    root.style.setProperty('--glass-blur', '0px');
     return;
   }
   root.classList.remove('app-opaque');
-  const blurOn = prefs.backgroundMaterial !== 'none' && materialOk;
+  // '블러 강도'(0~100)는 재질(미카/아크릴)과 무관하게 항상 적용 — 실제 블러 + 비침을 함께 키움
   const base = clampInt(prefs.windowOpacity, 15, 100, 100);           // 15~100
-  const extra = blurOn ? clampInt(prefs.blurIntensity, 0, 80, 30) : 0; // 추가 비침
-  const bg = Math.max(base - extra, 10);                     // 페이지 여백: 하한 10%
-  const surface = Math.max(base - Math.round(extra * 0.5), 25); // 표면: 하한 25%(가독성은 text-shadow로 보호)
+  const extra = clampInt(prefs.blurIntensity, 0, 100, 30);            // 0~100
+  const bg = Math.max(base - extra, 4);                      // 페이지 여백: 하한 4%
+  const surface = Math.max(base - Math.round(extra * 0.6), 12); // 표면: 하한 12%(가독성은 text-shadow로 보호)
   const r = document.documentElement.style;
   r.setProperty('--bg-opaque', bg + '%');
   r.setProperty('--surface-opaque', surface + '%');
+  r.setProperty('--glass-blur', Math.round(extra * 0.28) + 'px'); // 0~100 → 0~28px 실제 backdrop 블러
 }
 // 저장된 셸 설정을 네이티브 창에 재적용 (시작 시 main이 적용한 값과 동기화 + 미지원 OS 자가치유)
 async function applyShell() {
@@ -1240,20 +1242,21 @@ function recSyncLastDone(r) { const t = ymd(new Date()); r.lastDone = (r.done &&
 function renderRecurring() {
   const list = $('#recurring-list'); if (!list) return;
   list.innerHTML = '';
-  const today = ymd(new Date());
+  const day = selectedDay; // 선택한 날짜에 해당하는 반복만 표시
   for (const r of recurring) {
+    if (!recurringDueOn(r.rule, r.dates, day)) continue; // 그날 대상이 아니면 안 뜸
+    const hasDates = r.dates && Object.keys(r.dates).length > 0;
     const map = recDoneMap(r);
-    const doneToday = !!map[today];
-    const dueByRule = recurringDueToday(r.rule, '', today); // 규칙상 오늘 대상 여부(완료 무관)
+    const doneOnDay = !!map[day];
     const li = document.createElement('li');
-    li.className = 'mini-item' + (doneToday ? ' done' : (dueByRule ? '' : ' rec-off'));
-    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = doneToday;
-    cb.addEventListener('change', () => { if (cb.checked) map[today] = true; else delete map[today]; recSyncLastDone(r); scheduleSave(); renderRecurring(); });
-    const sp = document.createElement('span'); sp.className = 'mini-item-text rec-open'; sp.textContent = r.title; sp.title = '날짜별 완료 달력 열기'; sp.style.cursor = 'pointer';
+    li.className = 'mini-item' + (doneOnDay ? ' done' : '');
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = doneOnDay;
+    cb.addEventListener('change', () => { if (cb.checked) map[day] = true; else delete map[day]; recSyncLastDone(r); scheduleSave(); renderRecurring(); });
+    const sp = document.createElement('span'); sp.className = 'mini-item-text rec-open'; sp.textContent = r.title; sp.title = '날짜 지정 달력 열기'; sp.style.cursor = 'pointer';
     sp.addEventListener('click', () => openRecurringModal(r.id));
-    const tag = document.createElement('em'); tag.className = 'mini-tag'; tag.textContent = RULE_LABEL[r.rule] || r.rule; tag.style.cursor = 'pointer';
+    const tag = document.createElement('em'); tag.className = 'mini-tag'; tag.textContent = hasDates ? '지정일' : (RULE_LABEL[r.rule] || r.rule); tag.style.cursor = 'pointer';
     tag.addEventListener('click', () => openRecurringModal(r.id));
-    const cal = document.createElement('button'); cal.type = 'button'; cal.className = 'rec-cal-btn'; cal.textContent = '📅'; cal.title = '날짜별 완료 달력';
+    const cal = document.createElement('button'); cal.type = 'button'; cal.className = 'rec-cal-btn'; cal.textContent = '📅'; cal.title = '날짜 지정 (이 날짜에만 뜨게)';
     cal.addEventListener('click', (e) => { e.stopPropagation(); openRecurringModal(r.id); });
     const del = document.createElement('button'); del.className = 'mini-del'; del.textContent = '×';
     del.addEventListener('click', () => { recurring = recurring.filter((x) => x.id !== r.id); scheduleSave(); renderRecurring(); });
@@ -1275,7 +1278,8 @@ function openRecurringModal(id) {
 function closeRecurringModal() { $('#recurring-modal').hidden = true; recModalId = null; renderRecurring(); }
 function renderRecGrid() {
   const r = recurring.find((x) => x.id === recModalId); if (!r) return;
-  const map = recDoneMap(r);
+  if (!r.dates || typeof r.dates !== 'object') r.dates = {};
+  const map = r.dates; // 완료가 아니라 '이 날짜에 뜨게' 지정 맵
   const grid = $('#rec-grid'); if (!grid) return;
   const y = recMonth.getFullYear(), m = recMonth.getMonth();
   const lbl = $('#rec-label'); if (lbl) lbl.textContent = `${y}년 ${m + 1}월`;
@@ -1288,7 +1292,7 @@ function renderRecGrid() {
     b.textContent = c.d;
     b.addEventListener('click', () => {
       if (map[cellYmd]) delete map[cellYmd]; else map[cellYmd] = true;
-      recSyncLastDone(r); scheduleSave(); renderRecGrid();
+      scheduleSave(); renderRecGrid();
     });
     grid.appendChild(b);
   }
@@ -2070,7 +2074,7 @@ async function importData() {
     prefs.ytVolume = clampInt(prefs.ytVolume, 0, 100, 100);
     prefs.windowOpacity = clampInt(prefs.windowOpacity, 15, 100, 100);
     prefs.backgroundMaterial = ['none', 'mica', 'acrylic'].includes(prefs.backgroundMaterial) ? prefs.backgroundMaterial : 'none';
-    prefs.blurIntensity = clampInt(prefs.blurIntensity, 0, 80, 30);
+    prefs.blurIntensity = clampInt(prefs.blurIntensity, 0, 100, 30);
     prefs.uiScale = clampInt(prefs.uiScale, 80, 150, 100);
     prefs.windowTransparent = (typeof prefs.windowTransparent === 'boolean') ? prefs.windowTransparent : false;
     prefs.notifyDeadlines = (typeof prefs.notifyDeadlines === 'boolean') ? prefs.notifyDeadlines : true;
@@ -2461,7 +2465,7 @@ async function init() {
   prefs.ytVolume = clampInt(p.ytVolume, 0, 100, 100);
   prefs.windowOpacity = clampInt(p.windowOpacity, 15, 100, 100);
   prefs.backgroundMaterial = ['none', 'mica', 'acrylic'].includes(p.backgroundMaterial) ? p.backgroundMaterial : 'none';
-  prefs.blurIntensity = clampInt(p.blurIntensity, 0, 80, 30);
+  prefs.blurIntensity = clampInt(p.blurIntensity, 0, 100, 30);
   prefs.uiScale = clampInt(p.uiScale, 80, 150, 100);
   prefs.windowTransparent = (typeof p.windowTransparent === 'boolean') ? p.windowTransparent : false;
   prefs.notifyDeadlines = (typeof p.notifyDeadlines === 'boolean') ? p.notifyDeadlines : true;
@@ -2523,7 +2527,7 @@ if (typeof module !== 'undefined' && module.exports) {
     startOfWeek, addDays, weekDates, ymd, timeToMinutes, minutesToLabel,
     fmt12, weekRangeLabel, minutesToTop, categoryColor, migrate,
     hexToRgb, luminance, idealText,
-    monthGrid, recurringDueToday, formatWon, monthKey, sumLedger, sumByCategory,
+    monthGrid, recurringDueOn, formatWon, monthKey, sumLedger, sumByCategory,
     daysUntil, ddayLabel, computeStreak, icon, parseYouTube, textToHtml, migrateWork, loadWorks,
     mix, stripHtml, ytWatchUrl, nextTrackId, resolveNextId, reorderByIds, VIEW_COLORS, VIEW_META, viewAccent,
     clampInt, eventRemindKey, eventRemindAt, deadlineRemindAt, dueReminders,
