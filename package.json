@@ -1,14 +1,36 @@
 {
   "name": "hada2",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "description": "가볍고 예쁜 할 일/메모 관리 데스크톱 앱 (Electron)",
   "main": "src/main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "electron-builder --win --publish never",
+    "release": "electron-builder --win --publish always"
   },
   "author": "",
   "license": "MIT",
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
   "devDependencies": {
-    "electron": "^31.0.0"
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.hada2.app",
+    "productName": "하다",
+    "artifactName": "hada2-Setup-${version}.${ext}",
+    "files": ["src/**/*", "package.json"],
+    "directories": { "output": "dist", "buildResources": "build" },
+    "win": { "target": ["nsis"], "icon": "build/icon.png" },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "하다"
+    },
+    "publish": { "provider": "github", "owner": "qkrtlgus00", "repo": "hada2" }
   }
 }

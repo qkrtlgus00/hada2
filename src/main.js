@@ -8,6 +8,10 @@ const http = require('http');
 const https = require('https');
 const os = require('os');
 
+// userData 폴더명을 'hada2'로 고정 — productName('하다')이 app.getName()을 바꿔도
+// 기존 데이터 경로(%APPDATA%\hada2\data.json)를 유지 (폴더판·설치판 데이터 공유)
+app.setName('hada2');
+
 // 숨은 창에서 유튜브 오디오를 자동재생하려면 사용자 제스처 요구를 꺼야 함
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
@@ -59,6 +63,8 @@ async function remoteVersion() {
   return String(v);
 }
 ipcMain.handle('update:check', async () => {
+  // 설치본(패키지)은 electron-updater로 갱신 — 파일 덮어쓰기 방식은 폴더판에서만 사용
+  if (app.isPackaged) return { ok: true, current: app.getVersion(), latest: app.getVersion(), updateAvailable: false };
   try {
     const latest = await remoteVersion();
     const current = app.getVersion();
@@ -641,6 +647,19 @@ app.whenReady().then(async () => {
   }
   createWindowSafe();
   try { createTray(); } catch (e) { console.error('트레이 생성 실패:', e); }
+
+  // 설치본(패키지)에서만 electron-updater로 자동 업데이트 (폴더판은 기존 파일 덮어쓰기 방식 유지).
+  // require를 isPackaged 안에서 지연 로드 + try — 폴더판엔 electron-updater 모듈이 없어도 안전.
+  if (app.isPackaged) {
+    try {
+      const { autoUpdater } = require('electron-updater');
+      autoUpdater.autoDownload = true;
+      autoUpdater.on('update-downloaded', () => {
+        try { new Notification({ title: '하다 업데이트', body: '새 버전을 받았어요. 앱을 다시 켜면 적용됩니다.' }).show(); } catch (_) {}
+      });
+      autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+    } catch (e) { console.error('자동 업데이트 초기화 실패:', e); }
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindowSafe();
