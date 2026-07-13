@@ -99,7 +99,14 @@
 
           <!-- 할일 -->
           <div class="side-card">
-            <div class="side-card-head"><h3>할일</h3><span class="count" id="todo-count"></span></div>
+            <div class="side-card-head">
+              <h3>할일</h3>
+              <div class="todo-head-right">
+                <span id="todo-day-label" class="todo-day-label"></span>
+                <button type="button" id="todo-today" class="today-btn" hidden>오늘</button>
+                <span class="count" id="todo-count"></span>
+              </div>
+            </div>
             <form id="todo-form" class="mini-add" autocomplete="off">
               <input id="todo-input" type="text" maxlength="120" placeholder="할일 추가…" />
               <button type="submit" class="add-btn">+</button>

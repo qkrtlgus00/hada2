@@ -52,6 +52,8 @@ let prefs = {
 };
 let miniMonth = new Date(); // 미니 달력이 보는 달
 let weekStart = startOfWeek(new Date()); // 현재 보는 주의 월요일
+let selectedDay = ymd(new Date()); // 할일이 보여줄 날짜(미니 달력에서 선택). 기본 오늘
+let dayCursor = ymd(new Date()); // 자정 넘김 감지용 마지막 처리 날짜
 let catFilter = 'all';
 let searchText = '';
 let editingId = null; // 모달이 수정 중인 이벤트 id (없으면 신규)
@@ -546,6 +548,7 @@ function renderDays() {
       if (height < 44) node.classList.add('compact');
       node.querySelector('.event-title').textContent = ev.title;
       node.querySelector('.event-time').textContent = `${fmt12(ev.start)} - ${fmt12(ev.end)}`;
+      node.dataset.id = ev.id;
       node.addEventListener('click', (e) => { e.stopPropagation(); openModal(ev.id); });
       col.appendChild(node);
     }
@@ -732,6 +735,93 @@ function enableReorder(container, itemSel, commit) {
   container.addEventListener('pointercancel', onUp);
   // 드래그 직후 짧은 시간 내 click만 무시 (메모 모달/음악 재생 오작동 방지)
   container.addEventListener('click', (e) => { if (Date.now() - lastDragEnd < 350) { e.stopPropagation(); e.preventDefault(); } }, true);
+}
+
+// 일정 블록을 꾹 눌러(롱프레스) 드래그해 시간/요일을 옮기기. #day-cols에 1회 위임 바인딩.
+function enableEventDrag() {
+  const host = $('#day-cols');
+  if (!host || host.dataset.dragBound) return;
+  host.dataset.dragBound = '1';
+  let timer = null, node = null, ev = null, dragging = false;
+  let startX = 0, startY = 0, grabOffsetY = 0, durationM = 60, didDrag = false, lastDragEnd = 0;
+  let dropMins = 0, dropColIdx = 0;
+  const clearTimer = () => { if (timer) { clearTimeout(timer); timer = null; } };
+  const reset = () => { clearTimer(); node = null; ev = null; dragging = false; didDrag = false; };
+  const startDrag = (pid) => {
+    if (!node) return;
+    dragging = true;
+    node.classList.add('event-dragging');
+    document.body.classList.add('reordering');
+    try { node.setPointerCapture(pid); } catch (_) {}
+  };
+  const onDown = (e) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    const target = e.target.closest('.event');
+    if (!target || !host.contains(target)) return;
+    const found = events.find((x) => x.id === target.dataset.id);
+    if (!found) return;
+    node = target; ev = found; dragging = false; didDrag = false;
+    startX = e.clientX; startY = e.clientY;
+    grabOffsetY = e.clientY - target.getBoundingClientRect().top;
+    durationM = Math.max(timeToMinutes(ev.end) - timeToMinutes(ev.start), 20);
+    dropMins = timeToMinutes(ev.start);
+    dropColIdx = [...host.querySelectorAll('.day-col')].indexOf(target.parentElement);
+    const pid = e.pointerId;
+    clearTimer();
+    timer = setTimeout(() => startDrag(pid), 350);
+  };
+  const onMove = (e) => {
+    if (!dragging) {
+      if (timer) {
+        const dx = Math.abs(e.clientX - startX), dy = Math.abs(e.clientY - startY);
+        if (dx > 8 || dy > 8) clearTimer(); // 스크롤/선택 의도 → 롱프레스 취소
+      }
+      return;
+    }
+    didDrag = true;
+    e.preventDefault();
+    // 드래그 노드를 잠시 통과시켜 포인터 아래의 요일 열을 판정
+    node.style.pointerEvents = 'none';
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    node.style.pointerEvents = '';
+    const cols = [...host.querySelectorAll('.day-col')];
+    let col = under && under.closest ? under.closest('.day-col') : null;
+    if (!col || !host.contains(col)) col = node.parentElement;
+    const colRect = col.getBoundingClientRect();
+    let mins = DAY_START * 60 + Math.round(((e.clientY - grabOffsetY - colRect.top) / HOUR_HEIGHT) * 60 / 15) * 15;
+    mins = Math.min(Math.max(mins, DAY_START * 60), DAY_END * 60 - durationM);
+    if (node.parentElement !== col) col.appendChild(node);
+    node.style.top = `${minutesToTop(mins)}px`;
+    dropMins = mins;
+    dropColIdx = cols.indexOf(col);
+  };
+  const onUp = () => {
+    clearTimer();
+    if (dragging) {
+      node.classList.remove('event-dragging');
+      document.body.classList.remove('reordering');
+      if (didDrag && ev && dropColIdx >= 0) {
+        const newDate = ymd(weekDates(weekStart)[dropColIdx] || new Date());
+        const newStart = minutesToLabel(dropMins);
+        const newEnd = minutesToLabel(dropMins + durationM);
+        if (newDate !== ev.date || newStart !== ev.start || newEnd !== ev.end) {
+          ev.date = newDate; ev.start = newStart; ev.end = newEnd;
+          ev.updatedAt = new Date().toISOString();
+          disarmPastEventReminder(ev); // 과거로 옮긴 알림은 다시 울리지 않게
+          scheduleSave();
+        }
+        lastDragEnd = Date.now();
+        render();
+      }
+    }
+    reset();
+  };
+  host.addEventListener('pointerdown', onDown);
+  host.addEventListener('pointermove', onMove);
+  host.addEventListener('pointerup', onUp);
+  host.addEventListener('pointercancel', onUp);
+  // 드래그 직후 뒤따르는 click(=수정 모달)만 무시
+  host.addEventListener('click', (e) => { if (Date.now() - lastDragEnd < 350) { e.stopPropagation(); e.preventDefault(); } }, true);
 }
 
 // ---- 토스트 / 네비게이션 ----
@@ -1041,20 +1131,59 @@ function renderMiniCal() {
   for (const c of monthGrid(y, m)) {
     const cellYmd = `${c.y}-${String(c.m + 1).padStart(2, '0')}-${String(c.d).padStart(2, '0')}`;
     const b = document.createElement('button');
-    b.className = 'mini-day' + (c.inMonth ? '' : ' out') + (cellYmd === today ? ' today' : '') + (weekSet.has(cellYmd) ? ' in-week' : '');
+    b.className = 'mini-day' + (c.inMonth ? '' : ' out') + (cellYmd === today ? ' today' : '') + (cellYmd === selectedDay ? ' selected' : '') + (weekSet.has(cellYmd) ? ' in-week' : '');
     b.textContent = c.d;
-    b.addEventListener('click', () => { weekStart = startOfWeek(new Date(c.y, c.m, c.d)); render(); });
+    b.addEventListener('click', () => { selectedDay = cellYmd; weekStart = startOfWeek(new Date(c.y, c.m, c.d)); render(); });
     grid.appendChild(b);
   }
 }
 
 // ---- 할일 ----
+// 날짜 없는 옛 할일에 date를 채움(생성일 기준, 없으면 오늘)
+function migrateTodoDates() {
+  const today = ymd(new Date());
+  for (const t of todos) {
+    if (!t.date) t.date = t.createdAt ? ymd(new Date(t.createdAt)) : today;
+  }
+}
+// 미완료이면서 오늘 이전인 할일을 오늘로 이동. 이동한 개수 반환
+function rolloverTodos() {
+  const today = ymd(new Date());
+  let moved = 0;
+  for (const t of todos) {
+    if (!t.date) t.date = today;
+    if (!t.done && t.date < today) { t.date = today; moved++; }
+  }
+  return moved;
+}
+// 자정을 넘겼으면 롤오버 + (오늘을 보고 있었으면) 선택일 전진 후 재렌더
+function maybeRollDay() {
+  const today = ymd(new Date());
+  if (today === dayCursor) return;
+  const wasOnToday = (selectedDay === dayCursor);
+  dayCursor = today;
+  const moved = rolloverTodos();
+  if (wasOnToday) selectedDay = today;
+  if (moved) scheduleSave();
+  render();
+}
+// 할일 카드 상단 날짜 라벨 (오늘이면 '오늘 ·' 접두)
+function todoDayLabel(dayStr) {
+  const [y, m, d] = dayStr.split('-').map(Number);
+  const dow = DOW_KO[(new Date(y, m - 1, d).getDay() + 6) % 7];
+  const base = `${m}/${d} (${dow})`;
+  return dayStr === ymd(new Date()) ? `오늘 · ${base}` : base;
+}
 function renderTodos() {
   const list = $('#todo-list'); if (!list) return;
   list.innerHTML = '';
-  const active = todos.filter((t) => !t.done).length;
-  const cnt = $('#todo-count'); if (cnt) cnt.textContent = todos.length ? `${active}/${todos.length}` : '';
-  for (const t of todos) {
+  const today = ymd(new Date());
+  const dayTodos = todos.filter((t) => (t.date || today) === selectedDay);
+  const active = dayTodos.filter((t) => !t.done).length;
+  const cnt = $('#todo-count'); if (cnt) cnt.textContent = dayTodos.length ? `${active}/${dayTodos.length}` : '';
+  const lbl = $('#todo-day-label'); if (lbl) lbl.textContent = todoDayLabel(selectedDay);
+  const tbtn = $('#todo-today'); if (tbtn) tbtn.hidden = (selectedDay === today);
+  for (const t of dayTodos) {
     const li = document.createElement('li');
     li.className = 'mini-item' + (t.done ? ' done' : '');
     const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = t.done;
@@ -1086,12 +1215,15 @@ function renderRecurring() {
     li.className = 'mini-item' + (doneToday ? ' done' : '');
     const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = doneToday;
     cb.addEventListener('change', () => { if (cb.checked) map[today] = true; else delete map[today]; recSyncLastDone(r); scheduleSave(); renderRecurring(); });
-    const sp = document.createElement('span'); sp.className = 'mini-item-text rec-open'; sp.textContent = r.title; sp.title = '날짜별 완료 기록 열기';
+    const sp = document.createElement('span'); sp.className = 'mini-item-text rec-open'; sp.textContent = r.title; sp.title = '날짜별 완료 달력 열기'; sp.style.cursor = 'pointer';
     sp.addEventListener('click', () => openRecurringModal(r.id));
-    const tag = document.createElement('em'); tag.className = 'mini-tag'; tag.textContent = RULE_LABEL[r.rule] || r.rule;
+    const tag = document.createElement('em'); tag.className = 'mini-tag'; tag.textContent = RULE_LABEL[r.rule] || r.rule; tag.style.cursor = 'pointer';
+    tag.addEventListener('click', () => openRecurringModal(r.id));
+    const cal = document.createElement('button'); cal.type = 'button'; cal.className = 'rec-cal-btn'; cal.textContent = '📅'; cal.title = '날짜별 완료 달력';
+    cal.addEventListener('click', (e) => { e.stopPropagation(); openRecurringModal(r.id); });
     const del = document.createElement('button'); del.className = 'mini-del'; del.textContent = '×';
     del.addEventListener('click', () => { recurring = recurring.filter((x) => x.id !== r.id); scheduleSave(); renderRecurring(); });
-    li.append(cb, sp, tag, del); list.appendChild(li);
+    li.append(cb, sp, tag, cal, del); list.appendChild(li);
   }
 }
 // ---- 반복 항목 날짜 달력 모달 ----
@@ -1930,13 +2062,16 @@ function bindUI() {
   $('#mini-prev').addEventListener('click', () => { miniMonth = new Date(miniMonth.getFullYear(), miniMonth.getMonth() - 1, 1); renderMiniCal(); });
   $('#mini-next').addEventListener('click', () => { miniMonth = new Date(miniMonth.getFullYear(), miniMonth.getMonth() + 1, 1); renderMiniCal(); });
 
-  // 할일
+  // 할일 (보고 있는 날짜에 추가)
   $('#todo-form').addEventListener('submit', (e) => {
     e.preventDefault();
     const v = $('#todo-input').value.trim(); if (!v) return;
-    todos.unshift({ id: crypto.randomUUID(), title: v, done: false, createdAt: new Date().toISOString() });
+    todos.unshift({ id: crypto.randomUUID(), title: v, done: false, date: selectedDay, createdAt: new Date().toISOString() });
     $('#todo-input').value = ''; scheduleSave(); renderTodos();
   });
+  // 할일 '오늘' 버튼: 오늘로 복귀
+  const todoToday = $('#todo-today');
+  if (todoToday) todoToday.addEventListener('click', () => { selectedDay = ymd(new Date()); miniMonth = new Date(); weekStart = startOfWeek(new Date()); render(); });
   // 반복
   $('#recurring-form').addEventListener('submit', (e) => {
     e.preventDefault();
@@ -2029,6 +2164,7 @@ function bindUI() {
   enableReorder($('#notes-grid'), '.note-card', (ids) => { notes = reorderByIds(notes, ids); scheduleSave(); renderNotes(); });
   enableReorder($('#ledger-list'), '.ledger-row', (ids) => { ledger = reorderByIds(ledger, ids); prefs.manual.ledger = true; scheduleSave(); renderLedger(); });
   enableReorder($('#deadline-list'), '.deadline-row', (ids) => { works = reorderByIds(works, ids); prefs.manual.works = true; scheduleSave(); renderWorks(); });
+  enableEventDrag(); // 일정 블록 꾹 눌러 드래그로 시간/요일 이동
   // "자동 정렬" 복귀 버튼
   const autoBtn = (sel, key, render) => { const b = $(sel); if (b) b.addEventListener('click', () => { prefs.manual[key] = false; scheduleSave(); render(); }); };
   autoBtn('#ledger-auto', 'ledger', renderLedger);
@@ -2109,6 +2245,8 @@ async function init() {
     events = migrate(data);
     const arr = (k) => (data && Array.isArray(data[k])) ? data[k] : [];
     todos = arr('todos');
+    migrateTodoDates(); // 옛 할일에 date 채움
+    if (rolloverTodos()) scheduleSave(); // 앱이 꺼진 사이 자정을 넘겼으면 미완료 할일 오늘로 이동
     recurring = arr('recurring');
     ledger = arr('ledger');
     works = loadWorks(data); // 신형 works 또는 구형 deadlines+commissions 자동 병합
@@ -2174,7 +2312,7 @@ async function init() {
   if (window.api.youtube && window.api.youtube.setVolume) window.api.youtube.setVolume(prefs.ytVolume);
 
   if (nowTimer) clearInterval(nowTimer);
-  nowTimer = setInterval(renderNowLine, 60 * 1000);
+  nowTimer = setInterval(() => { maybeRollDay(); renderNowLine(); }, 60 * 1000);
   // 일정·마감 알림 스케줄러 (30초 주기 + 시작 직후 1회 — 꺼져 있던 사이 놓친 알림 처리)
   if (reminderTimer) clearInterval(reminderTimer);
   reminderTimer = setInterval(checkReminders, 30 * 1000);

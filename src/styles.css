@@ -491,6 +491,7 @@ body.is-max #tb-max .i-restore { display: block; }
   position: absolute;
   left: 5px; right: 5px;
   border: none;
+  touch-action: pan-y; /* 롱프레스 전 세로 스크롤 허용 */
   border-radius: 10px;
   padding: 7px 9px;
   text-align: left;
@@ -522,6 +523,7 @@ body.is-max #tb-max .i-restore { display: block; }
 .event.confirmed .event-badge { display: inline-block; }
 .event.compact { flex-direction: row; align-items: center; gap: 6px; padding: 4px 8px; }
 .event.compact .event-badge { display: none !important; }
+.event.event-dragging { z-index: 20; opacity: .92; box-shadow: 0 8px 24px rgba(24, 28, 48, 0.28); cursor: grabbing; transition: none; }
 
 /* 현재 시각 라인 */
 .now-line {
@@ -712,6 +714,10 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
 .side-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .side-card-head h3 { margin: 0; font-size: 13.5px; }
 .side-card-head .count { font-size: 12px; color: var(--text-dim); }
+.todo-head-right { display: flex; align-items: center; gap: 6px; }
+.todo-day-label { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+.today-btn { border: 1px solid var(--border-2); background: var(--panel); color: var(--text); border-radius: 7px; font-size: 11px; padding: 2px 8px; cursor: pointer; font-family: inherit; }
+.today-btn:hover { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 
 /* 미니 달력 */
 .mini-cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
@@ -726,6 +732,7 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
 .mini-day.out { color: var(--text-mute); opacity: .5; }
 .mini-day.in-week { background: var(--panel); }
 .mini-day.today { background: var(--accent); color: var(--accent-text); font-weight: 700; }
+.mini-day.selected { box-shadow: inset 0 0 0 2px var(--primary); font-weight: 700; }
 .mini-day.rec-on { background: var(--success); color: #fff; font-weight: 700; }
 
 /* 미니 입력/목록 */
@@ -741,6 +748,8 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
 .mini-tag { font-style: normal; font-size: 10.5px; color: var(--text-dim); background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; }
 .mini-del { border: none; background: transparent; color: var(--text-mute); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 2px; flex: 0 0 auto; }
 .mini-del:hover { color: var(--danger); }
+.rec-cal-btn { border: none; background: transparent; cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px; flex: 0 0 auto; opacity: .7; }
+.rec-cal-btn:hover { opacity: 1; }
 
 /* ===== 홈(대시보드) ===== */
 /* 섹션 헤더 (참고의 QUICK ACCESS › ) */
