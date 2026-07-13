@@ -1,6 +1,6 @@
 {
   "name": "hada2",
-  "version": "1.11.1",
+  "version": "1.11.2",
   "description": "가볍고 예쁜 할 일/메모 관리 데스크톱 앱 (Electron)",
   "main": "src/main.js",
   "scripts": {
@@ -25,11 +25,11 @@
     "directories": { "output": "dist", "buildResources": "build" },
     "win": { "target": ["nsis"], "icon": "build/icon.png" },
     "nsis": {
-      "oneClick": false,
+      "oneClick": true,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "shortcutName": "하다"
+      "shortcutName": "하다",
+      "deleteAppDataOnUninstall": false
     },
     "publish": { "provider": "github", "owner": "qkrtlgus00", "repo": "hada2" }
   }
