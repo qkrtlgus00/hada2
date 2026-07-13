@@ -137,50 +137,6 @@ function migrate(data) {
   return [];
 }
 
-// ---- 파일 표시용 순수 헬퍼 ----
-function formatSize(bytes) {
-  if (!bytes || bytes <= 0) return '—';
-  const u = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let i = 0, n = bytes;
-  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-  const s = (n >= 100 || i === 0) ? Math.round(n) : n.toFixed(1);
-  return `${s} ${u[i]}`;
-}
-// 파일 확장자 → 색 (구글 드라이브풍: 문서=파랑, 시트=초록, PDF=빨강, 이미지=주황 …)
-function fileColor(ext) {
-  const e = String(ext || '').toLowerCase();
-  if (['doc', 'docx', 'hwp', 'txt', 'rtf', 'odt', 'md'].includes(e)) return '#4285f4';
-  if (['xls', 'xlsx', 'csv', 'ods'].includes(e)) return '#34a853';
-  if (['ppt', 'pptx', 'odp', 'key'].includes(e)) return '#ff6d00';
-  if (e === 'pdf') return '#ea4335';
-  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'heic'].includes(e)) return '#f4b400';
-  if (['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(e)) return '#e5487f';
-  if (['mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg'].includes(e)) return '#8b5cf6';
-  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(e)) return '#b0862f';
-  return '#8a93a6';
-}
-// 확장자 → 타입 글리프 키
-function fileTypeGlyph(ext, isDir) {
-  if (isDir) return 'folder';
-  const e = String(ext || '').toLowerCase();
-  if (['doc', 'docx', 'hwp', 'txt', 'rtf', 'odt', 'md'].includes(e)) return 'fdoc';
-  if (['xls', 'xlsx', 'csv', 'ods'].includes(e)) return 'fsheet';
-  if (['ppt', 'pptx', 'odp', 'key'].includes(e)) return 'fslide';
-  if (e === 'pdf') return 'fpdf';
-  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'heic'].includes(e)) return 'fimage';
-  if (['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(e)) return 'fvideo';
-  if (['mp3', 'wav', 'flac', 'm4a', 'aac', 'ogg'].includes(e)) return 'music';
-  return 'file';
-}
-// 색깔 파일 타입 아이콘 (라인 아이콘을 타입 색으로) — 폴더는 파랑
-function fileIcon(ext, isDir) {
-  const color = isDir ? '#4285f4' : fileColor(ext);
-  return `<span class="file-ico" style="color:${color}">${icon(fileTypeGlyph(ext, isDir))}</span>`;
-}
-function kindLabel(ext, isDir) {
-  if (isDir) return '폴더';
-  return ext ? ext.toUpperCase() : '파일';
-}
 function hexToRgb(hex) {
   let h = String(hex || '').replace('#', '');
   if (h.length === 3) h = h.split('').map((c) => c + c).join('');
@@ -229,13 +185,6 @@ const ICONS = {
   play: '<path d="M7 5l12 7-12 7z"/>',
   panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
   sticker: '<path d="M4 4h10a6 6 0 0 1 6 6v0l-10 10H4z"/><path d="M14 20a6 6 0 0 0 6-6h-4a2 2 0 0 0-2 2z"/>',
-  // 파일 타입 글리프 (fileIcon이 타입 색으로 렌더)
-  fdoc: '<path d="M6 3h8l4 4v14H6z"/><path d="M13 3v5h5"/><path d="M9 12h6M9 15h6M9 18h4"/>',
-  fsheet: '<rect x="4" y="3.5" width="16" height="17" rx="1.5"/><path d="M4 9h16M4 14.5h16M10 3.5v17M15 3.5v17"/>',
-  fslide: '<rect x="3" y="5" width="18" height="12" rx="1.5"/><path d="M12 17v3M9 21h6"/>',
-  fpdf: '<path d="M6 3h8l4 4v14H6z"/><path d="M13 3v5h5"/><path d="M9 14h5M9 17h3"/>',
-  fimage: '<rect x="3" y="4.5" width="18" height="15" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="M21 16l-5-5-4 4-2-2-4 4"/>',
-  fvideo: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9l5 3-5 3z"/>',
 };
 function icon(name) {
   const p = ICONS[name];
@@ -636,15 +585,15 @@ function applyTheme(theme) {
 // ---- 창 셸 (커스텀 타이틀바 / 투명도 / 블러 / 배율) ----
 let materialOk = false; // 이 OS에서 미카/아크릴 지원 여부 (window:getState로 확인)
 
-// 창 투명도·흐림을 CSS 표면 알파로 반영 (앱 내부 방식).
-// 투명도(windowOpacity)는 항상 적용 → 재질 유무와 무관하게 앱이 직접 반투명.
-// 블러 재질이 켜져 있으면 blurIntensity만큼 더 비쳐 창 뒤 재질(블러)이 드러남.
+// 창 투명도·흐림을 CSS 표면 알파로 반영 (창 자체가 transparent라 실제 바탕화면이 비침).
+// 페이지(여백)는 더 강하게 비치고(하한 낮음), 표면(사이드바/본문)은 글자 뒤 최소 대비를 위해
+// 덜 비치게(하한 높음) 한다. 글자는 여기에 더해 text-shadow로 항상 또렷하게 보호.
 function applyGlassCss() {
   const blurOn = prefs.backgroundMaterial !== 'none' && materialOk;
   const base = clampInt(prefs.windowOpacity, 40, 100, 100);           // 40~100
   const extra = blurOn ? clampInt(prefs.blurIntensity, 0, 80, 30) : 0; // 추가 비침
-  const bg = Math.max(base - extra, 30);
-  const surface = Math.max(base - Math.round(extra * 0.6), 45); // 패널은 가독성 위해 덜 비침
+  const bg = Math.max(base - extra, 22);                     // 페이지 여백: 하한 22%
+  const surface = Math.max(base - Math.round(extra * 0.5), 55); // 표면: 하한 55%(가독성)
   const r = document.documentElement.style;
   r.setProperty('--bg-opaque', bg + '%');
   r.setProperty('--surface-opaque', surface + '%');
@@ -776,14 +725,14 @@ function toast(msg) {
 // 탭(뷰)마다 고유 색 — 활성 탭과 그 페이지 상단이 같은 색으로 켜져 "연결된" 느낌
 const VIEW_COLORS = {
   home: '#5b6cff', calendar: '#2f9e6b', ledger: '#e08a1e', deadlines: '#e5484d',
-  notes: '#0ea5a4', youtube: '#e5487f', files: '#1a73e8',
+  notes: '#0ea5a4', youtube: '#e5487f',
 };
 // 설정에서 뷰 색을 노출할 항목 (라벨)
 const VIEW_META = [
   { view: 'home', label: '홈' }, { view: 'calendar', label: '일정' },
   { view: 'ledger', label: '가계부' }, { view: 'deadlines', label: '작업 관리' },
   { view: 'notes', label: '메모' },
-  { view: 'youtube', label: '음악' }, { view: 'files', label: '파일' },
+  { view: 'youtube', label: '음악' },
 ];
 // 뷰 강조색: 사용자 지정(prefs.viewColors) 우선, 없으면 기본 VIEW_COLORS
 function viewAccent(view) {
@@ -804,7 +753,7 @@ function setView(view) {
 // 사이드바 "새로 만들기" 라벨을 현재 뷰에 맞춤
 const SB_NEW_LABEL = {
   calendar: '일정 추가', home: '일정 추가', ledger: '내역 추가', deadlines: '작업 추가',
-  notes: '새 메모', youtube: '노래 추가', files: '폴더 열기',
+  notes: '새 메모', youtube: '노래 추가',
 };
 function updateSbNewLabel(view) {
   const el = $('#sb-new-label'); if (el) el.textContent = SB_NEW_LABEL[view] || '새로 만들기';
@@ -816,7 +765,6 @@ function primaryAdd() {
     case 'deadlines': { const el = $('#d-title'); if (el) el.focus(); break; }
     case 'notes': addNote(); break;
     case 'youtube': { const el = $('#yt-url'); if (el) el.focus(); break; }
-    case 'files': pickFolder(); break;
     default: openModal(null); // calendar/home 등
   }
 }
@@ -853,7 +801,6 @@ function showView(name) {
   else if (name === 'youtube') renderYouTube();
 }
 function showCalendar() { setView('calendar'); }
-function showFiles() { setView('files'); }
 function showPlaceholder(name) {
   setView('placeholder');
   $('#placeholder-icon').innerHTML = icon('panel');
@@ -888,98 +835,6 @@ function checkReminders() {
     if (now - firedReminders[k] > 30 * 86400000) { delete firedReminders[k]; changed = true; }
   }
   if (changed) scheduleSave();
-}
-
-// ---- 파일(드라이브) 화면 ----
-let currentFolder = null;
-let currentParent = null;
-
-function hasFiles() { return typeof window !== 'undefined' && window.api && window.api.files; }
-
-async function openFiles() {
-  showFiles();
-  if (!hasFiles()) { toast('이 버전에는 파일 기능이 없어요. 파일을 모두 업데이트하세요.'); return; }
-  if (currentFolder) return; // 이미 열려 있으면 유지
-  let last = null;
-  try { last = localStorage.getItem('lastFolder'); } catch (_) {}
-  if (last) { await listFolder(last); return; }
-  const h = await window.api.files.home();
-  if (h.ok) await listFolder(h.path);
-}
-async function pickFolder() {
-  if (!hasFiles()) return;
-  const r = await window.api.files.pickFolder();
-  if (r.ok) await listFolder(r.path);
-}
-async function listFolder(dir) {
-  const r = await window.api.files.list(dir);
-  if (!r.ok) { toast('폴더를 열 수 없어요' + (r.error ? `: ${r.error}` : '')); return; }
-  currentFolder = r.path;
-  currentParent = r.parent;
-  try { localStorage.setItem('lastFolder', r.path); } catch (_) {}
-  renderFiles(r);
-}
-function goUpFolder() {
-  if (currentParent && currentParent !== currentFolder) listFolder(currentParent);
-}
-function activateEntry(it) {
-  if (it.isDir) listFolder(it.path);
-  else window.api.files.open(it.path).then((res) => { if (res && !res.ok) toast('파일을 열 수 없어요.'); });
-}
-function fmtFileDate(ms) {
-  if (!ms) return '—';
-  const d = new Date(ms);
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}. ${d.getMonth() + 1}. ${d.getDate()}. ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-function renderFiles(r) {
-  $('#files-path').textContent = r.path;
-  const items = [...r.items].sort((a, b) => {
-    if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  });
-
-  // 빠른 액세스: 최근 수정 상위 6
-  const recent = [...r.items].sort((a, b) => b.mtime - a.mtime).slice(0, 6);
-  const qaWrap = $('#quick-access-wrap');
-  const qa = $('#quick-access');
-  qa.innerHTML = '';
-  if (recent.length) {
-    qaWrap.hidden = false;
-    for (const it of recent) {
-      const c = document.createElement('div');
-      c.className = 'qa-card';
-      c.innerHTML = '<div class="qa-icon"></div><div class="qa-name"></div><div class="qa-sub"></div>';
-      c.querySelector('.qa-icon').innerHTML = fileIcon(it.ext, it.isDir);
-      c.querySelector('.qa-name').textContent = it.name;
-      c.querySelector('.qa-sub').textContent = it.isDir ? '폴더' : formatSize(it.size);
-      c.addEventListener('dblclick', () => activateEntry(it));
-      qa.appendChild(c);
-    }
-  } else {
-    qaWrap.hidden = true;
-  }
-
-  // 모든 파일 표
-  const list = $('#file-list');
-  list.innerHTML = '';
-  $('#files-empty').hidden = items.length > 0;
-  for (const it of items) {
-    const row = document.createElement('div');
-    row.className = 'file-row';
-    const name = document.createElement('span');
-    name.className = 'fc-name';
-    const fi = document.createElement('span'); fi.className = 'fi'; fi.innerHTML = fileIcon(it.ext, it.isDir);
-    const fn = document.createElement('span'); fn.className = 'fn'; fn.textContent = it.name;
-    name.append(fi, fn);
-    const kind = document.createElement('span'); kind.className = 'fc-kind'; kind.textContent = kindLabel(it.ext, it.isDir);
-    const date = document.createElement('span'); date.className = 'fc-date'; date.textContent = fmtFileDate(it.mtime);
-    const size = document.createElement('span'); size.className = 'fc-size'; size.textContent = it.isDir ? '—' : formatSize(it.size);
-    row.append(name, kind, date, size);
-    row.title = '더블클릭으로 열기';
-    row.addEventListener('dblclick', () => activateEntry(it));
-    list.appendChild(row);
-  }
 }
 
 // ---- 색상 사용자 지정 ----
@@ -1286,6 +1141,8 @@ function resetBannerCfg() {
   bannerCfg = { height: 180, zoom: 100, posX: 50, posY: 50 };
   openBannerModal(); renderBanner(); scheduleSave();
 }
+// 홈 카드 선택 인덱스 (1번 클릭=선택, 다시 클릭/더블클릭=진입)
+let homeSelectedIdx = -1;
 function renderHome() {
   renderBanner();
   const grid = $('#home-grid'); if (!grid) return;
@@ -1302,17 +1159,23 @@ function renderHome() {
     { ic: 'clock', label: '다가오는 마감', value: upcoming.length ? `${upcoming[0].title} · ${ddayLabel(daysUntil(upcoming[0].due, today))}` : '없음', view: 'deadlines' },
     { ic: 'wallet', label: '이번 달 지출', value: formatWon(led.expense), view: 'ledger' },
     { ic: 'check', label: '진행중 작업', value: works.filter((w) => w.status === '진행중').length + '건', view: 'deadlines' },
-    { ic: 'check', label: '오늘 습관', value: habits.length ? `${habitsToday}/${habits.length}` : '없음', view: 'habits' },
+    { ic: 'check', label: '오늘 습관', value: habits.length ? `${habitsToday}/${habits.length}` : '없음', view: 'calendar' },
   ];
   grid.innerHTML = '';
   cards.forEach((c, i) => {
     const el = document.createElement('button');
-    el.className = 'home-card' + (i === 0 ? ' feature' : ''); // 첫 카드는 강조색 채움(참고 이미지)
+    el.className = 'home-card' + (i === homeSelectedIdx ? ' selected' : '');
     el.innerHTML = '<div class="hc-icon"></div><div class="hc-label"></div><div class="hc-value"></div>';
     el.querySelector('.hc-icon').innerHTML = icon(c.ic);
     el.querySelector('.hc-label').textContent = c.label;
     el.querySelector('.hc-value').textContent = c.value;
-    el.addEventListener('click', () => activateNavByTarget(c.view));
+    // 1번 클릭 = 선택(강조), 이미 선택된 카드 다시 클릭 = 진입. 더블클릭 = 항상 진입.
+    el.addEventListener('click', () => {
+      if (homeSelectedIdx === i) { activateNavByTarget(c.view); return; }
+      homeSelectedIdx = i;
+      grid.querySelectorAll('.home-card').forEach((n, idx) => n.classList.toggle('selected', idx === homeSelectedIdx));
+    });
+    el.addEventListener('dblclick', () => activateNavByTarget(c.view));
     grid.appendChild(el);
   });
 }
@@ -1910,7 +1773,6 @@ function bindUI() {
       setActiveNav(li);
       const cur = $('#crumb-cur');
       if (cur) cur.textContent = li.textContent.trim();
-      if (target === 'files') { openFiles(); return; }
       showView(target);
     });
   });
@@ -2132,8 +1994,6 @@ function bindUI() {
     if (sidebar.classList.contains('collapsed')) toggleSidebar();
   });
   const sbNew = $('#sb-new'); if (sbNew) sbNew.addEventListener('click', primaryAdd);
-  const fPick = $('#files-pick'); if (fPick) fPick.addEventListener('click', pickFolder);
-  const fUp = $('#files-up'); if (fUp) fUp.addEventListener('click', goUpFolder);
 
   $('#theme-toggle').addEventListener('click', () => {
     const cur = document.documentElement.getAttribute('data-theme');
@@ -2240,7 +2100,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     startOfWeek, addDays, weekDates, ymd, timeToMinutes, minutesToLabel,
     fmt12, weekRangeLabel, minutesToTop, categoryColor, migrate,
-    formatSize, fileIcon, kindLabel, hexToRgb, luminance, idealText,
+    hexToRgb, luminance, idealText,
     monthGrid, recurringDueToday, formatWon, monthKey, sumLedger,
     daysUntil, ddayLabel, computeStreak, icon, parseYouTube, textToHtml, migrateWork, loadWorks,
     mix, stripHtml, ytWatchUrl, nextTrackId, resolveNextId, reorderByIds, VIEW_COLORS, VIEW_META, viewAccent,

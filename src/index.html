@@ -47,7 +47,6 @@
           <li data-nav data-target="deadlines"><span class="ico" data-icon="clock"></span><span>작업 관리</span></li>
           <li data-nav data-target="notes"><span class="ico" data-icon="note"></span><span>메모</span></li>
           <li data-nav data-target="youtube"><span class="ico" data-icon="music"></span><span>음악</span></li>
-          <li data-nav data-target="files"><span class="ico" data-icon="folder"></span><span>파일</span></li>
         </ul>
 
         <p class="nav-label">기타</p>
@@ -253,39 +252,6 @@
         <div class="yt-list" id="yt-list"></div>
       </section>
 
-      <!-- ============ 파일 (내 컴퓨터 폴더 탐색, Google Drive 스타일) ============ -->
-      <section class="files-view" data-view="files" id="files-view" hidden>
-        <div class="files-header">
-          <div class="files-title">
-            <h1 class="view-title">파일</h1>
-          </div>
-          <div class="header-right">
-            <button class="soft-btn" id="files-up">↑ 상위로</button>
-            <button class="add-btn" id="files-pick">폴더 선택</button>
-          </div>
-        </div>
-        <div class="files-path" id="files-path">폴더를 선택하세요</div>
-        <div class="files-scroll">
-          <div class="files-section" id="quick-access-wrap" hidden>
-            <p class="files-section-label">빠른 액세스</p>
-            <div class="quick-access" id="quick-access"></div>
-          </div>
-          <div class="files-section">
-            <p class="files-section-label">모든 파일</p>
-            <div class="file-table">
-              <div class="file-row file-head">
-                <span class="fc-name">이름</span>
-                <span class="fc-kind">종류</span>
-                <span class="fc-date">수정한 날짜</span>
-                <span class="fc-size">크기</span>
-              </div>
-              <div id="file-list"></div>
-            </div>
-            <div class="files-empty" id="files-empty" hidden>이 폴더에 항목이 없어요.</div>
-          </div>
-        </div>
-      </section>
-
       <!-- 준비 중 기능 안내 패널 (사이드바 메뉴 클릭 시) -->
       <section class="placeholder-panel" data-view="placeholder" id="placeholder" hidden>
         <div class="placeholder-inner">
@@ -353,6 +319,7 @@
         <div class="field">
           <span>창 투명도 <b id="w-opacity-val"></b></span>
           <input id="w-opacity" type="range" min="40" max="100" step="5" />
+          <small class="hint">낮추면 창이 실제로 투명해져 바탕화면이 비쳐요. 글자는 항상 또렷하게 보호됩니다.</small>
         </div>
 
         <div class="field">

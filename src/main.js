@@ -156,21 +156,19 @@ function sanitizeShellPrefs(p) {
     theme: o.theme === 'dark' ? 'dark' : 'light',
   };
 }
-function opaqueBgColor() { return bootShell.theme === 'dark' ? '#0f1016' : '#1e1e2e'; }
-
 function createWindow(useFileFallback) {
-  const matActive = bootShell.backgroundMaterial !== 'none' && materialSupported();
   mainWindow = new BrowserWindow({
     width: 960,
     height: 720,
     minWidth: 480,
     minHeight: 400,
     title: '하다 — 할 일 & 메모',
-    // OS 타이틀바를 숨기고 앱이 직접 그린 타이틀바 사용 (리사이즈 테두리·스냅은 유지)
-    titleBarStyle: 'hidden',
-    // 투명도는 앱 내부(CSS)에서 처리 → 네이티브 opacity 미사용 (블러 재질과 동시 사용 가능)
-    backgroundColor: matActive ? '#00000000' : opaqueBgColor(),
-    ...(matActive ? { backgroundMaterial: bootShell.backgroundMaterial } : {}),
+    // 진짜 투명창: 프레임 제거 + 투명 처리 → 투명도 낮추면 바탕화면이 실제로 비침.
+    // (앱이 직접 그린 #titlebar로 이동·최소/최대/닫기, 리사이즈는 프레임리스 기본 동작)
+    // 재질(mica/acrylic)은 생성 시 투명창과 충돌할 수 있어 런타임(applyShell)에서만 적용.
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -179,7 +177,7 @@ function createWindow(useFileFallback) {
       zoomFactor: bootShell.uiScale / 100, // 화면 배율 (첫 페인트부터 적용)
     },
   });
-  shellState.material = matActive ? bootShell.backgroundMaterial : 'none';
+  shellState.material = 'none';
 
   // 최대화 상태 변화를 렌더러에 알림 (타이틀바 최대화/복원 아이콘 교체)
   const sendMax = () => {
@@ -342,18 +340,13 @@ ipcMain.handle('window:setMaterial', (_e, m) => {
   if (m !== 'none' && !materialSupported()) return { ok: false, reason: 'UNSUPPORTED' };
   if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, reason: 'NO_WINDOW' };
   try {
+    // 창이 항상 투명(transparent:true)이므로 backgroundColor는 계속 투명 유지.
+    // 재질(mica/acrylic)만 켜고 끈다 — 없음이어도 CSS 투명도로 바탕화면이 비침.
     shellState.material = m;
-    if (m === 'none') {
-      mainWindow.setBackgroundMaterial('none');
-      mainWindow.setBackgroundColor(opaqueBgColor());
-    } else {
-      mainWindow.setBackgroundColor('#00000000'); // 투명 페인트 → 재질이 비침
-      mainWindow.setBackgroundMaterial(m);
-    }
+    mainWindow.setBackgroundMaterial(m === 'none' ? 'none' : m);
     return { ok: true };
   } catch (e) {
-    // 실패 시 안전한 불투명 상태로 복귀
-    try { mainWindow.setBackgroundMaterial('none'); mainWindow.setBackgroundColor(opaqueBgColor()); } catch (_) {}
+    try { mainWindow.setBackgroundMaterial('none'); } catch (_) {}
     shellState.material = 'none';
     return { ok: false, reason: String((e && e.message) || e) };
   }
@@ -362,51 +355,6 @@ ipcMain.handle('window:setUiScale', (_e, pct) => {
   const v = clampInt(pct, 80, 150, 100);
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.setZoomFactor(v / 100);
   return { ok: true, value: v };
-});
-
-// ========================= 파일(드라이브) 화면 =========================
-ipcMain.handle('files:pickFolder', async () => {
-  const res = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] });
-  if (res.canceled || !res.filePaths || !res.filePaths[0]) return { ok: false };
-  return { ok: true, path: res.filePaths[0] };
-});
-
-ipcMain.handle('files:list', async (_e, dirPath) => {
-  if (!dirPath) return { ok: false, error: 'NO_PATH' };
-  try {
-    const entries = await fsp.readdir(dirPath, { withFileTypes: true });
-    const items = [];
-    for (const ent of entries) {
-      const full = path.join(dirPath, ent.name);
-      let size = 0, mtime = 0;
-      try {
-        const st = await fsp.stat(full);
-        size = st.size;
-        mtime = st.mtimeMs;
-      } catch (_) { /* 접근 불가 항목은 크기/시간 0 */ }
-      const isDir = ent.isDirectory();
-      const dot = ent.name.lastIndexOf('.');
-      const ext = (!isDir && dot > 0) ? ent.name.slice(dot + 1).toLowerCase() : '';
-      items.push({ name: ent.name, path: full, isDir, size, mtime, ext });
-    }
-    return { ok: true, path: dirPath, parent: path.dirname(dirPath), items };
-  } catch (e) {
-    return { ok: false, error: String((e && e.message) || e) };
-  }
-});
-
-ipcMain.handle('files:open', async (_e, p) => {
-  const err = await shell.openPath(p); // 성공 시 ''
-  return { ok: !err, error: err || undefined };
-});
-
-ipcMain.handle('files:reveal', async (_e, p) => {
-  shell.showItemInFolder(p);
-  return { ok: true };
-});
-
-ipcMain.handle('files:home', async () => {
-  return { ok: true, path: app.getPath('home') };
 });
 
 // ---- 외부 브라우저로 URL 열기 (유튜브 등) ----

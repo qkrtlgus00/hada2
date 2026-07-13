@@ -57,15 +57,6 @@ contextBridge.exposeInMainWorld('api', {
     import: () => ipcRenderer.invoke('data:import'),
   },
 
-  /** 파일(드라이브) 화면 */
-  files: {
-    pickFolder: () => ipcRenderer.invoke('files:pickFolder'),
-    list: (dirPath) => ipcRenderer.invoke('files:list', dirPath),
-    open: (p) => ipcRenderer.invoke('files:open', p),
-    reveal: (p) => ipcRenderer.invoke('files:reveal', p),
-    home: () => ipcRenderer.invoke('files:home'),
-  },
-
   /** 앱 자체 업데이트 (GitHub에서 받아 적용) */
   update: {
     check: () => ipcRenderer.invoke('update:check'),
