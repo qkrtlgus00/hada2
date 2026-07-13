@@ -42,7 +42,11 @@ function fetchText(url) {
         if (res.statusCode !== 200) { res.resume(); reject(new Error('HTTP ' + res.statusCode)); return; }
         let data = ''; res.setEncoding('utf8');
         res.on('data', (c) => { data += c; });
-        res.on('end', () => resolve(data));
+        res.on('end', () => {
+          const cl = res.headers['content-length'];
+          if (cl && Number(cl) !== Buffer.byteLength(data)) { reject(new Error('TRUNCATED')); return; } // 잘린 응답 차단
+          resolve(data);
+        });
       });
     req.on('error', reject);
     req.setTimeout(10000, () => { req.destroy(new Error('TIMEOUT')); });
@@ -67,17 +71,32 @@ ipcMain.handle('update:apply', async () => {
     const payload = [];
     for (const rel of UP_FILES) {
       const dest = path.normalize(path.join(APP_ROOT, rel));
-      if (!dest.startsWith(APP_ROOT)) throw new Error('BAD_PATH ' + rel); // 경로 이탈 차단
-      payload.push({ dest, text: await fetchText(UP_BASE + rel) });
+      if (!dest.startsWith(APP_ROOT + path.sep)) throw new Error('BAD_PATH ' + rel); // 경로 이탈 차단
+      payload.push({ rel, dest, text: await fetchText(UP_BASE + rel) });
     }
-    // 2) 원자적으로 쓰기 (tmp → rename)
+    // 2) 쓰기 전 무결성 검증 — 비었거나 깨진 파일이면 아무것도 안 씀
     for (const p of payload) {
-      const tmp = p.dest + '.tmp-update';
-      await fsp.mkdir(path.dirname(p.dest), { recursive: true });
-      await fsp.writeFile(tmp, p.text, 'utf8');
-      await fsp.rename(tmp, p.dest);
+      if (!p.text || p.text.length < 10) throw new Error('EMPTY ' + p.rel);
+      if (p.rel.endsWith('.json')) JSON.parse(p.text);
+      else if (p.rel.endsWith('.js')) new Function(p.text); // 구문 검사(실행하지 않음)
     }
-    // 3) 새 코드로 재시작
+    // 3) 기존본 백업 후 원자적 쓰기, 중간 실패 시 롤백
+    const written = [];
+    try {
+      for (const p of payload) {
+        await fsp.mkdir(path.dirname(p.dest), { recursive: true });
+        try { await fsp.copyFile(p.dest, p.dest + '.bak-update'); } catch (_) {}
+        const tmp = p.dest + '.tmp-update';
+        await fsp.writeFile(tmp, p.text, 'utf8');
+        await fsp.rename(tmp, p.dest);
+        written.push(p.dest);
+      }
+    } catch (werr) {
+      for (const dest of written) { try { await fsp.copyFile(dest + '.bak-update', dest); } catch (_) {} } // 롤백
+      throw werr;
+    }
+    for (const p of payload) { try { await fsp.unlink(p.dest + '.bak-update'); } catch (_) {} } // 백업 정리
+    // 4) 새 코드로 재시작
     app.relaunch();
     app.exit(0);
     return { ok: true };
@@ -295,6 +314,17 @@ ipcMain.handle('data:load', async () => {
 
 ipcMain.handle('data:save', async (_event, data) => {
   return saveData(data);
+});
+
+// 종료 직전 렌더러가 동기적으로 마지막 상태를 flush (디바운스 유실 방지)
+ipcMain.on('data:saveSync', (e, data) => {
+  try {
+    const safe = (data && typeof data === 'object' && !Array.isArray(data)) ? data : {};
+    const tmp = `${DATA_FILE}.tmp-sync`;
+    fs.writeFileSync(tmp, JSON.stringify(safe), 'utf-8');
+    fs.renameSync(tmp, DATA_FILE);
+    e.returnValue = true;
+  } catch (err) { e.returnValue = false; }
 });
 
 ipcMain.handle('notify', async (_event, payload) => {

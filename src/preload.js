@@ -11,6 +11,9 @@ contextBridge.exposeInMainWorld('api', {
   /** { tasks: [...] } 를 디스크에 저장한다. */
   save: (data) => ipcRenderer.invoke('data:save', data),
 
+  /** 종료 직전 동기 저장 (마지막 변경 유실 방지) */
+  saveSync: (data) => ipcRenderer.sendSync('data:saveSync', data),
+
   /** 네이티브 데스크톱 알림을 띄운다. */
   notify: (title, body) => ipcRenderer.invoke('notify', { title, body }),
 

@@ -1,6 +1,6 @@
 {
   "name": "hada2",
-  "version": "1.9.1",
+  "version": "1.9.2",
   "description": "가볍고 예쁜 할 일/메모 관리 데스크톱 앱 (Electron)",
   "main": "src/main.js",
   "scripts": {

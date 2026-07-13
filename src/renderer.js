@@ -403,12 +403,25 @@ const $ = (s) => (typeof document !== 'undefined' ? document.querySelector(s) : 
 
 // ---- 저장 ----
 let saveTimer = null;
+let saveRetry = null;
+let saveDirty = false; // 예약/미완료 저장이 있으면 true (종료 시 flush 판단용)
+function snapshot() {
+  return { events, todos, recurring, ledger, works, notes, habits, playlist, banner, bannerCfg, stickers, prefs, firedReminders };
+}
 function scheduleSave() {
+  saveDirty = true;
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
     saveTimer = null;
-    try { await window.api.save({ events, todos, recurring, ledger, works, notes, habits, playlist, banner, bannerCfg, stickers, prefs, firedReminders }); }
-    catch (err) { console.error('저장 실패:', err); }
+    try {
+      await window.api.save(snapshot());
+      saveDirty = false;
+      if (saveRetry) { clearTimeout(saveRetry); saveRetry = null; }
+    } catch (err) {
+      console.error('저장 실패:', err);
+      toast('저장 실패 — 디스크 공간이나 권한을 확인하세요. 자동 재시도 중…');
+      if (!saveRetry) saveRetry = setTimeout(() => { saveRetry = null; scheduleSave(); }, 5000); // 성공할 때까지 재시도
+    }
   }, 250);
 }
 
@@ -1224,8 +1237,9 @@ function renderRecurring() {
   for (const r of recurring) {
     const map = recDoneMap(r);
     const doneToday = !!map[today];
+    const dueByRule = recurringDueToday(r.rule, '', today); // 규칙상 오늘 대상 여부(완료 무관)
     const li = document.createElement('li');
-    li.className = 'mini-item' + (doneToday ? ' done' : '');
+    li.className = 'mini-item' + (doneToday ? ' done' : (dueByRule ? '' : ' rec-off'));
     const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = doneToday;
     cb.addEventListener('change', () => { if (cb.checked) map[today] = true; else delete map[today]; recSyncLastDone(r); scheduleSave(); renderRecurring(); });
     const sp = document.createElement('span'); sp.className = 'mini-item-text rec-open'; sp.textContent = r.title; sp.title = '날짜별 완료 달력 열기'; sp.style.cursor = 'pointer';
@@ -1509,7 +1523,7 @@ function renderWorks() {
 
     const badge = document.createElement('span'); badge.className = 'dl-badge ' + cls; badge.textContent = doneStatus ? '완료' : (n === null ? '' : ddayLabel(n));
     const del = document.createElement('button'); del.className = 'mini-del'; del.textContent = '×';
-    del.addEventListener('click', () => { works = works.filter((x) => x.id !== it.id); scheduleSave(); renderWorks(); });
+    del.addEventListener('click', () => deleteWork(it.id));
     row.append(body, sel);
     if (Number(it.amount) > 0) {
       const paidBtn = document.createElement('button');
@@ -1586,10 +1600,16 @@ function saveWorkModal() {
   setWorkPaid(w, $('#w-paid') ? $('#w-paid').checked : !!w.paid); // 입금 상태 반영 + 가계부 연동 + 저장/렌더
   closeWorkModal();
 }
+// 작업 삭제 — 입금 연동으로 만들어진 가계부 수입도 함께 회수(유령 수입 방지)
+function deleteWork(id) {
+  const w = works.find((x) => x.id === id);
+  if (w && w.ledgerId) ledger = ledger.filter((x) => x.id !== w.ledgerId);
+  works = works.filter((x) => x.id !== id);
+  scheduleSave(); renderWorks(); renderLedger();
+}
 function deleteWorkModal() {
   if (editingWorkId && confirm('이 작업을 삭제할까요?')) {
-    works = works.filter((x) => x.id !== editingWorkId);
-    scheduleSave(); renderWorks(); closeWorkModal();
+    deleteWork(editingWorkId); closeWorkModal();
   }
 }
 
@@ -2005,6 +2025,10 @@ async function importData() {
 
 // ---- 이벤트 바인딩 ----
 function bindUI() {
+  // 종료·새로고침 직전, 예약된 저장이 남아 있으면 동기적으로 flush (마지막 변경 유실 방지)
+  window.addEventListener('beforeunload', () => {
+    if (saveDirty && window.api.saveSync) { try { window.api.saveSync(snapshot()); saveDirty = false; } catch (_) {} }
+  });
   const form = $('#event-form');
   form.addEventListener('submit', (e) => {
     e.preventDefault();

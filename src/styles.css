@@ -748,6 +748,7 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
 .mini-item input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--primary); flex: 0 0 auto; cursor: pointer; }
 .mini-item-text { flex: 1; word-break: break-word; }
 .mini-item.done .mini-item-text { text-decoration: line-through; color: var(--text-dim); }
+.mini-item.rec-off { opacity: .45; } /* 반복: 규칙상 오늘 대상 아님 */
 .mini-tag { font-style: normal; font-size: 10.5px; color: var(--text-dim); background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; }
 .mini-del { border: none; background: transparent; color: var(--text-mute); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 2px; flex: 0 0 auto; }
 .mini-del:hover { color: var(--danger); }
