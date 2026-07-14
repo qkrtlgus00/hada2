@@ -1364,7 +1364,12 @@ function applyBannerStyle() {
   const wrap = $('#home-banner'); if (wrap) wrap.style.height = h + 'px';
   for (const id of ['#home-banner-img', '#banner-preview-img']) {
     const im = $(id);
-    if (im) { im.style.transform = `scale(${z})`; im.style.objectPosition = `${px}% ${py}%`; }
+    if (im) {
+      const pan = Math.max(0, z - 1); // 줌으로 생긴 넘침(overflow)만큼 팬 가능
+      const tx = (50 - px) * pan, ty = (50 - py) * pan; // 좌우/상하 이동(object-position로 안 되는 가로 보완)
+      im.style.transform = `translate(${tx}%, ${ty}%) scale(${z})`;
+      im.style.objectPosition = `${px}% ${py}%`;
+    }
   }
 }
 function renderBanner() {
