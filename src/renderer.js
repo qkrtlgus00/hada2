@@ -460,14 +460,40 @@ function deleteEvent(id) {
 function allCategories() {
   return [...new Set(events.map((e) => e.category).filter(Boolean))].sort();
 }
+// 이벤트가 이 날짜에 뜨는지 — 반복이면 규칙대로(시작일 이후), 아니면 그 날짜만.
+function eventRepeatsOn(ev, dayYmd) {
+  const rep = ev.repeat || 'none';
+  if (rep === 'none') return ev.date === dayYmd;
+  if (dayYmd < ev.date) return false; // 시작일 이전엔 안 뜸
+  const d = new Date(dayYmd + 'T00:00:00'), base = new Date(ev.date + 'T00:00:00');
+  switch (rep) {
+    case 'daily': return true;
+    case 'weekday': { const w = d.getDay(); return w >= 1 && w <= 5; }
+    case 'weekly': return d.getDay() === base.getDay();   // 시작일과 같은 요일
+    case 'monthly': return d.getDate() === base.getDate(); // 시작일과 같은 날짜
+    default: return true;
+  }
+}
 function visibleEventsForDate(dateStr) {
   const q = searchText.trim().toLowerCase();
   return events.filter((e) => {
-    if (e.date !== dateStr) return false;
+    if (!eventRepeatsOn(e, dateStr)) return false;
     if (catFilter !== 'all' && e.category !== catFilter) return false;
     if (q && !`${e.title} ${e.notes}`.toLowerCase().includes(q)) return false;
     return true;
   });
+}
+
+// v1.14.5: 기존 '반복 목록'(종일 반복) → 반복 일정으로 1회 이전 (기본 09~10시, 사용자가 편집 가능)
+function migrateRecurringToEvents() {
+  if (!Array.isArray(recurring) || !recurring.length) return;
+  const today = ymd(new Date());
+  const now = new Date().toISOString();
+  for (const r of recurring) {
+    events.push({ id: (r.id || crypto.randomUUID()), title: r.title || '반복', date: today, start: '09:00', end: '10:00', repeat: r.rule || 'daily', createdAt: now, updatedAt: now });
+  }
+  recurring = [];
+  scheduleSave();
 }
 
 // ---- 렌더 ----
@@ -489,7 +515,6 @@ function render() {
     renderGutter();
     renderDays();
     renderNowLine();
-    renderWeekRecurring();
   }
 }
 
@@ -590,7 +615,7 @@ function renderDays() {
       node.style.setProperty('--ev-fg', fg);
       if (ev.confirmed) node.classList.add('confirmed');
       if (height < 44) node.classList.add('compact');
-      node.querySelector('.event-title').textContent = ev.title;
+      node.querySelector('.event-title').textContent = ((ev.repeat && ev.repeat !== 'none') ? '🔁 ' : '') + ev.title;
       node.querySelector('.event-time').textContent = `${fmt12(ev.start)} - ${fmt12(ev.end)}`;
       node.dataset.id = ev.id;
       node.addEventListener('click', (e) => { e.stopPropagation(); openModal(ev.id); });
@@ -638,19 +663,12 @@ function renderMonth() {
       const [bg, fg] = categoryColor(ev.category);
       const chip = document.createElement('div'); chip.className = 'cal-chip';
       chip.style.background = bg; chip.style.color = fg;
-      chip.textContent = ev.title;
+      chip.textContent = ((ev.repeat && ev.repeat !== 'none') ? '🔁 ' : '') + ev.title;
       chip.title = `${fmt12(ev.start)} ${ev.title}`;
       chip.addEventListener('click', (e) => { e.stopPropagation(); openModal(ev.id); });
       cell.appendChild(chip);
     }
     if (evs.length > 4) { const more = document.createElement('div'); more.className = 'cal-more'; more.textContent = `+${evs.length - 4}개`; cell.appendChild(more); }
-    // 반복 규칙상 이 날 뜨는 항목을 🔁 칩으로
-    for (const r of recurring) {
-      if (!recurringDueOn(r.rule, cellYmd)) continue;
-      const rc = document.createElement('div'); rc.className = 'cal-chip rep';
-      rc.textContent = r.title; rc.title = `반복 · ${RULE_LABEL[r.rule] || r.rule}`;
-      cell.appendChild(rc);
-    }
     // 날짜칸 클릭 → 그 주로 이동 + 이번주로 전환
     cell.addEventListener('click', () => { selectedDay = cellYmd; weekStart = startOfWeek(new Date(c.y, c.m, c.d)); calMode = 'week'; prefs.calMode = 'week'; scheduleSave(); render(); });
     grid.appendChild(cell);
@@ -694,8 +712,8 @@ function openModal(id, prefill) {
   $('#f-confirmed').checked = ev ? !!ev.confirmed : false;
   $('#f-notes').value = ev ? ev.notes : '';
   const fr = $('#f-remind'); if (fr) fr.value = (ev && ev.remindMin != null) ? String(ev.remindMin) : '';
+  const rp = $('#f-repeat'); if (rp) rp.value = (ev && ev.repeat) ? ev.repeat : 'none';
 
-  renderRecurring(); // 모달 안 반복 목록(모든 반복 규칙 관리)
   renderAlarms();    // 모달 안 알람 목록
   $('#modal').hidden = false;
   setTimeout(() => $('#f-title').focus(), 30);
@@ -2261,6 +2279,7 @@ async function importData() {
   const arr = (k) => (Array.isArray(d[k]) ? d[k] : []);
   events = Array.isArray(d.events) ? d.events : migrate(d);
   todos = arr('todos'); recurring = arr('recurring'); ledger = arr('ledger');
+  migrateRecurringToEvents(); // 반복 목록 → 반복 일정 1회 이전
   works = loadWorks(d); // 신형 works 또는 구형 deadlines+commissions 자동 병합
   notes = arr('notes'); habits = arr('habits'); alarms = arr('alarms');
   playlist = arr('playlist');
@@ -2321,6 +2340,7 @@ function bindUI() {
       confirmed: $('#f-confirmed').checked,
       notes: $('#f-notes').value,
       remindMin: frv === '' ? null : Number(frv),
+      repeat: $('#f-repeat') ? $('#f-repeat').value : 'none',
     });
     closeModal();
   });
@@ -2468,13 +2488,7 @@ function bindUI() {
   // 할일 '오늘' 버튼: 오늘로 복귀
   const todoToday = $('#todo-today');
   if (todoToday) todoToday.addEventListener('click', () => { selectedDay = ymd(new Date()); renderTodos(); });
-  // 반복
-  $('#recurring-form').addEventListener('submit', (e) => {
-    e.preventDefault();
-    const v = $('#recurring-input').value.trim(); if (!v) return;
-    recurring.unshift({ id: crypto.randomUUID(), title: v, rule: $('#recurring-rule').value });
-    $('#recurring-input').value = ''; scheduleSave(); renderRecurring(); render(); // 달력에도 바로 반영
-  });
+  // 반복은 이제 '일정'의 반복 옵션으로 통합 (일정 추가 시 repeat 선택 → 달력에 여러 날 표시)
 
   const alarmForm = $('#alarm-form');
   if (alarmForm) alarmForm.addEventListener('submit', (e) => {
@@ -2667,6 +2681,7 @@ async function init() {
     migrateTodoDates(); // 옛 할일에 date 채움
     if (rolloverTodos()) scheduleSave(); // 앱이 꺼진 사이 자정을 넘겼으면 미완료 할일 오늘로 이동
     recurring = arr('recurring');
+    migrateRecurringToEvents(); // 반복 목록 → 반복 일정 1회 이전
     ledger = arr('ledger');
     works = loadWorks(data); // 신형 works 또는 구형 deadlines+commissions 자동 병합
     notes = arr('notes');

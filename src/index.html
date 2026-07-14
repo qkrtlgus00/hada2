@@ -107,7 +107,6 @@
             <div class="cal-head" id="cal-head">
               <div class="time-gutter-head"></div>
             </div>
-            <div class="cal-allday" id="cal-allday" hidden></div>
             <div class="cal-body" id="cal-body">
               <div class="time-gutter" id="time-gutter"></div>
               <div class="day-cols" id="day-cols"></div>
@@ -456,6 +455,16 @@
               <option value="1440">1일 전</option>
             </select>
           </label>
+          <label class="field">
+            <span>반복</span>
+            <select id="f-repeat" class="mini-select">
+              <option value="none" selected>안 함</option>
+              <option value="daily">매일</option>
+              <option value="weekday">평일</option>
+              <option value="weekly">매주</option>
+              <option value="monthly">매월</option>
+            </select>
+          </label>
           <label class="field check-field">
             <span>확정</span>
             <label class="switch">
@@ -487,21 +496,6 @@
             <button type="submit" class="add-btn">+</button>
           </form>
           <ul class="mini-list" id="alarm-list"></ul>
-        </div>
-        <!-- 반복 목록 -->
-        <div class="modal-sub">
-          <div class="side-card-head"><h3>반복 목록</h3></div>
-          <form id="recurring-form" class="mini-add" autocomplete="off">
-            <input id="recurring-input" type="text" maxlength="120" placeholder="반복 항목…" />
-            <select id="recurring-rule" class="mini-select">
-              <option value="daily">매일</option>
-              <option value="weekday">평일</option>
-              <option value="weekly">매주</option>
-              <option value="monthly">매월</option>
-            </select>
-            <button type="submit" class="add-btn">+</button>
-          </form>
-          <ul class="mini-list" id="recurring-list"></ul>
         </div>
       </div>
     </div>
