@@ -88,7 +88,7 @@
             <div class="week-title">
               <div class="seg-toggle cal-mode" id="cal-mode">
                 <button type="button" class="seg-btn" data-mode="month">전체</button>
-                <button type="button" class="seg-btn on" data-mode="week">이번주</button>
+                <button type="button" class="seg-btn on" data-mode="week">주간</button>
               </div>
               <button class="wk-nav" id="prev-week" aria-label="이전">‹</button>
               <h1 id="week-label">01–07 January 2025</h1>
@@ -128,7 +128,7 @@
             <button class="wk-nav" id="todo-prev" aria-label="이전 날">‹</button>
             <span id="todo-day-label" class="todo-day-label">오늘</span>
             <button class="wk-nav" id="todo-next" aria-label="다음 날">›</button>
-            <button type="button" id="todo-today" class="soft-btn">오늘</button>
+            <button type="button" id="todo-today" class="soft-btn">오늘로</button>
             <span class="count" id="todo-count"></span>
           </div>
         </div>
@@ -168,15 +168,17 @@
         <div class="ledger-summary" id="ledger-summary"></div>
         <div class="ledger-stats" id="ledger-stats" hidden></div>
         <form id="ledger-form" class="ledger-form" autocomplete="off">
-          <div class="seg-toggle" id="l-type-toggle">
-            <button type="button" class="seg-btn income" data-t="income">수입</button>
-            <button type="button" class="seg-btn expense on" data-t="expense">지출</button>
-          </div>
-          <input id="l-date" type="date" required />
-          <input id="l-amount" type="number" min="0" step="1" placeholder="금액" required />
-          <input id="l-category" type="text" maxlength="20" placeholder="분류(식비 등)" />
-          <input id="l-memo" type="text" maxlength="60" placeholder="메모(선택)" />
-          <button type="submit" class="add-btn">추가</button>
+          <label class="lf-field"><span>구분</span>
+            <div class="seg-toggle" id="l-type-toggle">
+              <button type="button" class="seg-btn income" data-t="income">수입</button>
+              <button type="button" class="seg-btn expense on" data-t="expense">지출</button>
+            </div>
+          </label>
+          <label class="lf-field f-date"><span>날짜</span><input id="l-date" type="date" required /></label>
+          <label class="lf-field f-amount"><span>금액</span><input id="l-amount" type="number" min="0" step="1" placeholder="0" required /></label>
+          <label class="lf-field f-cat"><span>분류</span><input id="l-category" type="text" maxlength="20" placeholder="식비 등" /></label>
+          <label class="lf-field grow"><span>메모</span><input id="l-memo" type="text" maxlength="60" placeholder="메모(선택)" /></label>
+          <button type="submit" class="add-btn lf-add">추가</button>
         </form>
         <div class="ledger-list" id="ledger-list"></div>
       </section>
@@ -189,25 +191,10 @@
             <input type="month" id="deadline-month" class="mini-select" />
             <button class="soft-btn" id="deadline-all">전체</button>
             <button class="soft-btn" id="deadline-auto" title="상태·마감순 자동 정렬">자동 정렬</button>
+            <button class="add-btn" id="work-add">+ 작업 추가</button>
           </div>
         </div>
         <div class="ledger-summary" id="deadline-summary"></div>
-        <form id="deadline-form" class="ledger-form" autocomplete="off">
-          <input id="d-title" type="text" maxlength="80" placeholder="작업/이름" required />
-          <input id="d-client" type="text" maxlength="40" placeholder="클라이언트" />
-          <input id="d-contact" type="text" maxlength="60" placeholder="연락처(SNS 등)" />
-          <input id="d-platform" type="text" maxlength="30" placeholder="플랫폼" />
-          <input id="d-type" type="text" maxlength="30" placeholder="유형(반신 등)" />
-          <input id="d-amount" type="number" min="0" step="1" placeholder="금액" />
-          <select id="d-status" class="mini-select">
-            <option value="대기">대기</option>
-            <option value="진행중">진행중</option>
-            <option value="완료">완료</option>
-          </select>
-          <input id="d-due" type="date" required />
-          <input id="d-notes" type="text" maxlength="80" placeholder="메모(선택)" />
-          <button type="submit" class="add-btn">추가</button>
-        </form>
         <div class="deadline-list" id="deadline-list"></div>
       </section>
 
@@ -535,7 +522,7 @@
   <div class="modal-overlay" id="work-modal" hidden>
     <div class="modal">
       <div class="modal-head">
-        <h2>작업 수정</h2>
+        <h2 id="work-modal-title">작업 수정</h2>
         <button class="icon-btn ghost" id="work-close" aria-label="닫기">✕</button>
       </div>
       <form id="work-form" class="modal-body" autocomplete="off">

@@ -1,8 +1,8 @@
 'use strict';
 
 // ===================== 상수 =====================
-const DAY_START = 6;   // 06:00
-const DAY_END = 22;    // 22:00
+const DAY_START = 0;   // 00:00 — 하루 전체 시간 표시
+const DAY_END = 24;    // 24:00
 const HOUR_HEIGHT = 64; // styles.css --hour-height 와 일치
 const DOW_KO = ['월', '화', '수', '목', '금', '토', '일'];
 
@@ -483,7 +483,9 @@ function render() {
     $('#week-label').textContent = `${miniMonth.getFullYear()}년 ${miniMonth.getMonth() + 1}월`;
     renderMonth();
   } else {
-    $('#week-label').textContent = weekRangeLabel(weekStart);
+    const wk = Math.round((weekStart - startOfWeek(new Date())) / (7 * 864e5));
+    const rel = wk === 0 ? '이번주' : wk === 1 ? '다음주' : wk === -1 ? '지난주' : wk > 0 ? `${wk}주 후` : `${-wk}주 전`;
+    $('#week-label').textContent = `${rel} · ${weekRangeLabel(weekStart)}`;
     renderHead();
     renderGutter();
     renderDays();
@@ -1272,13 +1274,17 @@ function todoDayLabel(dayStr) {
   const [y, m, d] = dayStr.split('-').map(Number);
   const dow = DOW_KO[(new Date(y, m - 1, d).getDay() + 6) % 7];
   const base = `${m}/${d} (${dow})`;
-  return dayStr === ymd(new Date()) ? `오늘 · ${base}` : base;
+  const now = new Date();
+  const diff = Math.round((new Date(y, m - 1, d) - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 864e5);
+  const rel = diff === 0 ? '오늘' : diff === 1 ? '내일' : diff === -1 ? '어제' : '';
+  return rel ? `${rel} · ${base}` : base;
 }
 function renderTodos() {
   const list = $('#todo-list'); if (!list) return;
   list.innerHTML = '';
   const today = ymd(new Date());
   const dayTodos = todos.filter((t) => (t.date || today) === selectedDay);
+  dayTodos.sort((a, b) => (a.done === b.done) ? 0 : (a.done ? 1 : -1)); // 완료 항목은 목록 아래로(안정정렬)
   const active = dayTodos.filter((t) => !t.done).length;
   const cnt = $('#todo-count'); if (cnt) cnt.textContent = dayTodos.length ? `${active}/${dayTodos.length}` : '';
   const lbl = $('#todo-day-label'); if (lbl) lbl.textContent = todoDayLabel(selectedDay);
@@ -1688,29 +1694,31 @@ function setWorkPaid(w, paid) {
 // ---- 작업 항목 편집 모달 (메모 포함 전체 필드) ----
 let editingWorkId = null;
 function openWorkModal(id) {
-  const w = works.find((x) => x.id === id);
-  if (!w) return;
-  editingWorkId = id;
-  $('#w-title').value = w.title || '';
-  $('#w-client').value = w.client || '';
-  $('#w-contact').value = w.contact || '';
-  $('#w-platform').value = w.platform || '';
-  $('#w-type').value = w.type || '';
-  $('#w-amount').value = w.amount ? String(w.amount) : '';
-  $('#w-status').value = WORK_STATUS.includes(w.status) ? w.status : '대기';
-  $('#w-due').value = w.due || '';
-  $('#w-notes').value = w.notes || '';
-  const wp = $('#w-paid'); if (wp) wp.checked = !!w.paid;
+  const w = id ? works.find((x) => x.id === id) : null;
+  editingWorkId = w ? w.id : null;
+  const isNew = !w;
+  const mt = $('#work-modal-title'); if (mt) mt.textContent = isNew ? '작업 추가' : '작업 수정';
+  const wd = $('#work-del'); if (wd) wd.hidden = isNew; // 신규엔 삭제 버튼 없음
+  $('#w-title').value = w ? (w.title || '') : '';
+  $('#w-client').value = w ? (w.client || '') : '';
+  $('#w-contact').value = w ? (w.contact || '') : '';
+  $('#w-platform').value = w ? (w.platform || '') : '';
+  $('#w-type').value = w ? (w.type || '') : '';
+  $('#w-amount').value = (w && w.amount) ? String(w.amount) : '';
+  $('#w-status').value = (w && WORK_STATUS.includes(w.status)) ? w.status : '대기';
+  $('#w-due').value = w ? (w.due || '') : ymd(new Date()); // 신규 기본 마감 = 오늘
+  $('#w-notes').value = w ? (w.notes || '') : '';
+  const wp = $('#w-paid'); if (wp) wp.checked = w ? !!w.paid : false;
   $('#work-modal').hidden = false;
   setTimeout(() => $('#w-title').focus(), 30);
 }
 function closeWorkModal() { $('#work-modal').hidden = true; editingWorkId = null; }
 function saveWorkModal() {
-  const w = works.find((x) => x.id === editingWorkId);
-  if (!w) { closeWorkModal(); return; }
   const title = $('#w-title').value.trim(); const due = $('#w-due').value;
   if (!title || !due) { toast('제목과 마감일을 입력하세요.'); return; }
   const status = $('#w-status').value;
+  let w = editingWorkId ? works.find((x) => x.id === editingWorkId) : null;
+  if (!w) { w = { id: crypto.randomUUID(), progress: 0 }; works.push(w); } // 신규 추가
   Object.assign(w, {
     title, due, status, done: status === '완료',
     client: $('#w-client').value.trim(),
@@ -2261,6 +2269,7 @@ function bindUI() {
   const wc = $('#work-close'); if (wc) wc.addEventListener('click', closeWorkModal);
   const wcn = $('#work-cancel'); if (wcn) wcn.addEventListener('click', closeWorkModal);
   const wd = $('#work-del'); if (wd) wd.addEventListener('click', deleteWorkModal);
+  const wa = $('#work-add'); if (wa) wa.addEventListener('click', () => openWorkModal(null)); // + 작업 추가 → 모달 신규 모드
   const wm = $('#work-modal'); if (wm) wm.addEventListener('click', (e) => { if (e.target === wm) closeWorkModal(); });
 
   // 반복 항목 날짜 달력 모달
@@ -2424,27 +2433,7 @@ function bindUI() {
   $('#deadline-month').addEventListener('change', () => { deadlineMonth = $('#deadline-month').value; renderWorks(); });
   $('#deadline-all').addEventListener('click', () => { deadlineMonth = ''; $('#deadline-month').value = ''; renderWorks(); });
 
-  // 작업 관리 (마감·커미션·외주 통합)
-  $('#deadline-form').addEventListener('submit', (e) => {
-    e.preventDefault();
-    const title = $('#d-title').value.trim(); const due = $('#d-due').value;
-    if (!title || !due) return;
-    const status = $('#d-status').value;
-    const w = {
-      id: crypto.randomUUID(), title, due,
-      client: $('#d-client').value.trim(),
-      contact: $('#d-contact').value.trim(),
-      platform: $('#d-platform').value.trim(),
-      type: $('#d-type').value.trim(),
-      amount: Number($('#d-amount').value) || 0,
-      status, done: status === '완료',
-      notes: $('#d-notes').value.trim(), progress: 0,
-    };
-    works.push(w);
-    disarmPastWorkReminders(w); // 과거 마감으로 만든 알림은 다시 안 울리게
-    ['d-title', 'd-client', 'd-contact', 'd-platform', 'd-type', 'd-amount', 'd-due', 'd-notes'].forEach((id) => { $('#' + id).value = ''; });
-    scheduleSave(); renderWorks();
-  });
+  // 작업 관리: '+ 작업 추가' 버튼이 작업 모달을 신규 모드로 엶 (인라인 폼 제거, 배선은 작업 모달부)
 
   // 유튜브
   $('#yt-form').addEventListener('submit', (e) => {

@@ -613,17 +613,18 @@ function startYtPoll() {
         "try{ad=!!(mp&&mp.getAdState&&mp.getAdState()===1);}catch(e){}" +
         "try{vid=(mp&&mp.getVideoData&&mp.getVideoData().video_id)||'';}catch(e){}" +
         "if(!ad){var p=document.querySelector('.html5-video-player');ad=!!(p&&p.classList.contains('ad-showing'));}" +
+        "try{document.querySelectorAll('video').forEach(function(x){x.volume=window.__ytvol;});}catch(e){}" + // 모든 video 볼륨 상시 고정(음소거 해제 순간 풀볼륨 터짐 방지)
         "return {ended:v?v.ended:false,d:v?v.duration:0,ad:ad,vid:vid};" +
         "})();"
       );
       if (!st) return;
       const drift = !!(ytExpectedId && st.vid && st.vid !== ytExpectedId);
-      // 음소거 게이트: 지정 영상이 광고 없이 재생 중이면 즉시 소리(positive), 광고/다른곡이 2틱(≈500ms)
-      // 이어질 때만 음소거. vid가 순간 비거나(버퍼링/시크/곡경계) 전환 중이면 현재 상태 유지 → 소리 플래핑 방지.
+      // 음소거 게이트: 광고는 즉시 음소거(본편보다 큰 광고음 누출 방지), 지정 영상 재생 중이면 즉시 소리.
+      // 다른 곡(오토플레이 등)만 2틱(≈500ms) 지연 음소거. vid가 순간 비거나 전환 중이면 현재 상태 유지(플래핑 방지).
       const positived = ytExpectedId ? (st.vid === ytExpectedId && !st.ad) : (!!st.vid && !st.ad);
-      const adOrOther = st.ad || drift;
-      if (positived) { ytMuteStreak = 0; try { ytWindow.webContents.setAudioMuted(false); } catch (_) {} }
-      else if (adOrOther) { ytMuteStreak++; if (ytMuteStreak >= 2) { try { ytWindow.webContents.setAudioMuted(true); } catch (_) {} } }
+      if (st.ad) { ytMuteStreak = 0; try { ytWindow.webContents.setAudioMuted(true); } catch (_) {} }
+      else if (positived) { ytMuteStreak = 0; try { ytWindow.webContents.setAudioMuted(false); } catch (_) {} }
+      else if (drift) { ytMuteStreak++; if (ytMuteStreak >= 2) { try { ytWindow.webContents.setAudioMuted(true); } catch (_) {} } }
       if (drift && !ytEndedSent) {
         ytEndedSent = true;
         stopYtPoll();
