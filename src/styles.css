@@ -222,6 +222,8 @@ body.is-max #tb-max .i-restore { display: block; }
   font-size: 13.5px;
   transition: background .13s, color .13s;
 }
+/* 탭(nav)·접기·브랜드가 스티커보다 클릭/표시 우선 (스티커 레이어 z-index:50 위로) */
+.side-nav li, #sidebar-collapse, .brand { position: relative; z-index: 51; }
 .side-nav li .ico { opacity: .85; }
 .side-nav li span:not(.ico) { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .side-nav li:hover { background: var(--sidebar-active-bg); color: var(--sidebar-text); }
