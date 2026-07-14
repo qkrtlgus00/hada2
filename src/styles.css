@@ -771,6 +771,12 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
 .cal-cell.today .cal-cell-num { color: var(--primary); }
 .cal-chip { font-size: 11px; border-radius: 5px; padding: 1px 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 .cal-more { font-size: 10.5px; color: var(--text-mute); padding-left: 2px; }
+.cal-chip.rep { background: rgba(47,158,107,.15); color: var(--success); cursor: default; }
+/* 주간표 상단 종일 반복 줄 */
+.cal-allday { display: flex; flex: 0 0 auto; border-bottom: 1px solid var(--grid-line); }
+.allday-gutter { width: 56px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; font-size: 10px; color: var(--text-mute); }
+.allday-cell { flex: 1 1 0; min-width: 0; border-left: 1px solid var(--grid-line); padding: 3px 4px; display: flex; flex-direction: column; gap: 2px; }
+.allday-chip { font-size: 10.5px; background: rgba(47,158,107,.15); color: var(--success); border-radius: 5px; padding: 1px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* 투두리스트 탭: 날짜 스테퍼 */
 .todo-date-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -864,6 +870,11 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
   transition: background .1s;
 }
 .ledger-row:hover { background: var(--surface-2); border-radius: 8px; }
+.ledger-row.lr-clickable { cursor: pointer; }
+/* 우클릭 삭제 메뉴 (커서 위치 팝업) */
+.ctx-menu { position: fixed; z-index: 300; background: var(--panel); border: 1px solid var(--grid-line); border-radius: 10px; box-shadow: var(--shadow); padding: 4px; min-width: 88px; }
+.ctx-menu button { display: block; width: 100%; text-align: left; border: none; background: transparent; color: var(--danger); font-size: 13px; font-family: inherit; padding: 7px 12px; border-radius: 7px; cursor: pointer; }
+.ctx-menu button:hover { background: var(--surface); }
 .ledger-row .lr-ico .ic-svg { width: 18px; height: 18px; }
 /* 표 헤더 행 (참고 ALL FILES) */
 .ledger-head {

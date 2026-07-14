@@ -276,15 +276,14 @@ function monthGrid(year, month /* 0-based */) {
   }
   return cells;
 }
-// 반복 항목이 특정 날짜에 대상인지. 지정 날짜(dates)가 있으면 그 날짜에만, 없으면 규칙대로.
-function recurringDueOn(rule, dates, dayYmd) {
-  if (dates && typeof dates === 'object' && Object.keys(dates).length) return !!dates[dayYmd];
+// 반복 항목이 특정 날짜에 뜨는지 — 규칙만으로 판정(매일/평일/매주 월요일/매월 1일).
+function recurringDueOn(rule, dayYmd) {
   const dow = new Date(dayYmd + 'T00:00:00').getDay(); // 0=일
   switch (rule) {
     case 'daily': return true;
     case 'weekday': return dow >= 1 && dow <= 5;
-    case 'weekly': return dow === 1; // 매주 월요일 기준
-    case 'monthly': return Number(dayYmd.slice(8, 10)) === 1;
+    case 'weekly': return dow === 1; // 매주 월요일
+    case 'monthly': return Number(dayYmd.slice(8, 10)) === 1; // 매월 1일
     default: return true;
   }
 }
@@ -490,6 +489,7 @@ function render() {
     renderGutter();
     renderDays();
     renderNowLine();
+    renderWeekRecurring();
   }
 }
 
@@ -644,10 +644,39 @@ function renderMonth() {
       cell.appendChild(chip);
     }
     if (evs.length > 4) { const more = document.createElement('div'); more.className = 'cal-more'; more.textContent = `+${evs.length - 4}개`; cell.appendChild(more); }
+    // 반복 규칙상 이 날 뜨는 항목을 🔁 칩으로
+    for (const r of recurring) {
+      if (!recurringDueOn(r.rule, cellYmd)) continue;
+      const rc = document.createElement('div'); rc.className = 'cal-chip rep';
+      rc.textContent = r.title; rc.title = `반복 · ${RULE_LABEL[r.rule] || r.rule}`;
+      cell.appendChild(rc);
+    }
     // 날짜칸 클릭 → 그 주로 이동 + 이번주로 전환
     cell.addEventListener('click', () => { selectedDay = cellYmd; weekStart = startOfWeek(new Date(c.y, c.m, c.d)); calMode = 'week'; prefs.calMode = 'week'; scheduleSave(); render(); });
     grid.appendChild(cell);
   }
+}
+
+// 주간표 상단 '종일 반복' 줄 — 요일별로 그날 뜨는 반복을 칩으로 (없으면 숨김)
+function renderWeekRecurring() {
+  const strip = $('#cal-allday'); if (!strip) return;
+  strip.innerHTML = '';
+  const gut = document.createElement('div'); gut.className = 'allday-gutter'; gut.textContent = '반복';
+  strip.appendChild(gut);
+  let any = false;
+  weekDates(weekStart).forEach((d) => {
+    const dateStr = ymd(d);
+    const cell = document.createElement('div'); cell.className = 'allday-cell';
+    for (const r of recurring) {
+      if (!recurringDueOn(r.rule, dateStr)) continue;
+      any = true;
+      const chip = document.createElement('div'); chip.className = 'allday-chip';
+      chip.textContent = r.title; chip.title = `반복 · ${RULE_LABEL[r.rule] || r.rule}`;
+      cell.appendChild(chip);
+    }
+    strip.appendChild(cell);
+  });
+  strip.hidden = !any;
 }
 
 // ---- 모달 ----
@@ -769,6 +798,45 @@ function reorderByIds(arr, orderedVisibleIds) {
   return arr.map((x) => (visible.has(x.id) ? queue[qi++] : x));
 }
 // 컨테이너에 롱프레스 드래그 재정렬을 1회 바인딩. commit(orderedIds) 호출.
+// 우클릭 → 커서 위치에 '삭제' 메뉴 (목록별 onDelete(id) 콜백). 단일 메뉴 노드 재사용.
+let _ctxMenuEl = null;
+function _ctxOutside(e) { if (_ctxMenuEl && !_ctxMenuEl.contains(e.target)) closeCtxMenu(); }
+function _ctxKey(e) { if (e.key === 'Escape') closeCtxMenu(); }
+function closeCtxMenu() {
+  if (!_ctxMenuEl) return;
+  _ctxMenuEl.remove(); _ctxMenuEl = null;
+  document.removeEventListener('pointerdown', _ctxOutside, true);
+  document.removeEventListener('scroll', closeCtxMenu, true);
+  document.removeEventListener('keydown', _ctxKey, true);
+}
+function showCtxMenu(x, y, onDelete) {
+  closeCtxMenu();
+  const menu = document.createElement('div'); menu.className = 'ctx-menu';
+  const btn = document.createElement('button'); btn.type = 'button'; btn.textContent = '삭제';
+  btn.addEventListener('click', () => { closeCtxMenu(); onDelete(); });
+  menu.appendChild(btn);
+  document.body.appendChild(menu);
+  const w = menu.offsetWidth || 90, h = menu.offsetHeight || 40;
+  menu.style.left = Math.max(6, Math.min(x, window.innerWidth - w - 6)) + 'px';
+  menu.style.top = Math.max(6, Math.min(y, window.innerHeight - h - 6)) + 'px';
+  _ctxMenuEl = menu;
+  setTimeout(() => {
+    document.addEventListener('pointerdown', _ctxOutside, true);
+    document.addEventListener('scroll', closeCtxMenu, true);
+    document.addEventListener('keydown', _ctxKey, true);
+  }, 0);
+}
+function enableContextDelete(container, itemSel, onDelete) {
+  if (!container || container.dataset.ctxDelBound) return;
+  container.dataset.ctxDelBound = '1';
+  container.addEventListener('contextmenu', (e) => {
+    const item = e.target.closest(itemSel);
+    if (!item || !container.contains(item)) return;
+    const id = item.dataset.id; if (!id) return;
+    e.preventDefault();
+    showCtxMenu(e.clientX, e.clientY, () => onDelete(id));
+  });
+}
 function enableReorder(container, itemSel, commit) {
   if (!container || container.dataset.reorderBound) return;
   container.dataset.reorderBound = '1';
@@ -1305,34 +1373,18 @@ function renderTodos() {
 
 // ---- 반복 목록 ----
 const RULE_LABEL = { daily: '매일', weekday: '평일', weekly: '매주', monthly: '매월' };
-// 반복 항목의 날짜별 완료맵 (구버전 lastDone 1일 기록을 흡수)
-function recDoneMap(r) {
-  if (!r.done || typeof r.done !== 'object') r.done = r.lastDone ? { [r.lastDone]: true } : {};
-  return r.done;
-}
-function recSyncLastDone(r) { const t = ymd(new Date()); r.lastDone = (r.done && r.done[t]) ? t : ''; }
 function renderRecurring() {
   const list = $('#recurring-list'); if (!list) return;
   list.innerHTML = '';
-  const day = ymd(new Date()); // 완료 체크는 오늘 기준 (모달의 관리 목록 — 모든 반복 규칙 표시)
   for (const r of recurring) {
-    const hasDates = r.dates && Object.keys(r.dates).length > 0;
-    const map = recDoneMap(r);
-    const doneOnDay = !!map[day];
     const li = document.createElement('li');
-    li.className = 'mini-item' + (doneOnDay ? ' done' : '');
-    li.dataset.id = r.id; // 꾹 눌러 순서 변경용
-    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = doneOnDay;
-    cb.addEventListener('change', () => { if (cb.checked) map[day] = true; else delete map[day]; recSyncLastDone(r); scheduleSave(); renderRecurring(); });
-    const sp = document.createElement('span'); sp.className = 'mini-item-text rec-open'; sp.textContent = r.title; sp.title = '날짜 지정 달력 열기'; sp.style.cursor = 'pointer';
-    sp.addEventListener('click', () => openRecurringModal(r.id));
-    const tag = document.createElement('em'); tag.className = 'mini-tag'; tag.textContent = hasDates ? '지정일' : (RULE_LABEL[r.rule] || r.rule); tag.style.cursor = 'pointer';
-    tag.addEventListener('click', () => openRecurringModal(r.id));
-    const cal = document.createElement('button'); cal.type = 'button'; cal.className = 'rec-cal-btn'; cal.textContent = '📅'; cal.title = '날짜 지정 (이 날짜에만 뜨게)';
-    cal.addEventListener('click', (e) => { e.stopPropagation(); openRecurringModal(r.id); });
+    li.className = 'mini-item';
+    li.dataset.id = r.id; // 꾹 눌러 순서 변경 / 우클릭 삭제
+    const sp = document.createElement('span'); sp.className = 'mini-item-text'; sp.textContent = r.title;
+    const tag = document.createElement('em'); tag.className = 'mini-tag'; tag.textContent = RULE_LABEL[r.rule] || r.rule;
     const del = document.createElement('button'); del.className = 'mini-del'; del.textContent = '×';
-    del.addEventListener('click', () => { recurring = recurring.filter((x) => x.id !== r.id); scheduleSave(); renderRecurring(); });
-    li.append(cb, sp, tag, cal, del); list.appendChild(li);
+    del.addEventListener('click', () => { recurring = recurring.filter((x) => x.id !== r.id); scheduleSave(); renderRecurring(); render(); });
+    li.append(sp, tag, del); list.appendChild(li);
   }
 }
 // ---- 반복 항목 날짜 달력 모달 ----
@@ -1387,6 +1439,7 @@ function renderAlarms() {
     const past = new Date(a.at).getTime() < now; // 이미 지난(울린) 알람은 흐리게
     const li = document.createElement('li');
     li.className = 'mini-item' + (past ? ' done' : '');
+    li.dataset.id = a.id; // 우클릭 삭제용
     const sp = document.createElement('span'); sp.className = 'mini-item-text'; sp.textContent = a.title || '알람';
     const tag = document.createElement('em'); tag.className = 'mini-tag'; tag.textContent = fmtAlarmAt(a.at);
     const del = document.createElement('button'); del.className = 'mini-del'; del.textContent = '×';
@@ -1564,11 +1617,49 @@ function renderLedger() {
     const memo = document.createElement('span'); memo.className = 'lr-memo'; memo.textContent = it.memo || '';
     const amt = document.createElement('span'); amt.className = 'lr-amt'; amt.textContent = (it.type === 'income' ? '+' : '-') + formatWon(it.amount);
     const del = document.createElement('button'); del.className = 'mini-del'; del.textContent = '×';
-    del.addEventListener('click', () => { ledger = ledger.filter((x) => x.id !== it.id); scheduleSave(); renderLedger(); });
+    del.addEventListener('click', (e) => { e.stopPropagation(); ledger = ledger.filter((x) => x.id !== it.id); scheduleSave(); renderLedger(); });
+    row.classList.add('lr-clickable');
+    row.addEventListener('click', () => openLedgerModal(it.id)); // 행 클릭 → 수정 모달 (작업관리처럼)
     row.append(cat, memo, amt, del);
     list.appendChild(row);
   }
   filterCurrentRows();
+}
+
+// ---- 가계부 내역 추가/수정 모달 (작업 모달과 같은 패턴) ----
+let editingLedgerId = null;
+function setLedgerModalType(t) {
+  ledgerType = (t === 'income') ? 'income' : 'expense';
+  const tg = $('#lm-type-toggle');
+  if (tg) tg.querySelectorAll('.seg-btn').forEach((x) => x.classList.toggle('on', x.dataset.t === ledgerType));
+}
+function openLedgerModal(id) {
+  const it = id ? ledger.find((x) => x.id === id) : null;
+  editingLedgerId = it ? it.id : null;
+  const isNew = !it;
+  const mt = $('#ledger-modal-title'); if (mt) mt.textContent = isNew ? '내역 추가' : '내역 수정';
+  const dl = $('#lm-del'); if (dl) dl.hidden = isNew;
+  setLedgerModalType(it ? it.type : 'expense');
+  $('#lm-date').value = it ? it.date : ymd(new Date());
+  $('#lm-amount').value = (it && it.amount) ? String(it.amount) : '';
+  $('#lm-category').value = it ? (it.category || '') : '';
+  $('#lm-memo').value = it ? (it.memo || '') : '';
+  $('#ledger-modal').hidden = false;
+  setTimeout(() => $('#lm-amount').focus(), 30);
+}
+function closeLedgerModal() { $('#ledger-modal').hidden = true; editingLedgerId = null; }
+function saveLedgerModal() {
+  const amount = Number($('#lm-amount').value);
+  if (!amount) { toast('금액을 입력하세요.'); return; }
+  const date = $('#lm-date').value || ymd(new Date());
+  const data = { date, type: ledgerType, amount, category: $('#lm-category').value.trim(), memo: $('#lm-memo').value.trim() };
+  if (editingLedgerId) {
+    const it = ledger.find((x) => x.id === editingLedgerId);
+    if (it) Object.assign(it, data);
+  } else {
+    ledger.unshift({ id: crypto.randomUUID(), ...data });
+  }
+  scheduleSave(); renderLedger(); closeLedgerModal();
 }
 
 // ---- 작업 관리 (마감·커미션·외주 통합) ----
@@ -1586,7 +1677,6 @@ function renderWorks() {
   // 상단 요약: 상태별 건수 + 금액 합계 (필터 범위 기준)
   const cnt = (st) => scope.filter((d) => d.status === st).length;
   const totalAll = scope.reduce((s, d) => s + (Number(d.amount) || 0), 0);
-  const totalOpen = scope.filter((d) => d.status !== '완료').reduce((s, d) => s + (Number(d.amount) || 0), 0);
   const sum = $('#deadline-summary');
   if (sum) {
     const label = deadlineMonth ? deadlineMonth.replace('-', '년 ') + '월' : '전체';
@@ -1594,9 +1684,7 @@ function renderWorks() {
       `<div class="lsum"><span>대기</span><strong>${cnt('대기')}건</strong></div>` +
       `<div class="lsum"><span>진행중</span><strong>${cnt('진행중')}건</strong></div>` +
       `<div class="lsum income"><span>완료</span><strong>${cnt('완료')}건</strong></div>` +
-      `<div class="lsum"><span>${label} 금액</span><strong>${formatWon(totalAll)}</strong></div>` +
-      `<div class="lsum"><span>미완료 금액</span><strong>${formatWon(totalOpen)}</strong></div>` +
-      `<div class="lsum"><span>미수금</span><strong>${formatWon(scope.filter((d) => d.status === '완료' && !d.paid).reduce((s, d) => s + (Number(d.amount) || 0), 0))}</strong></div>`;
+      `<div class="lsum"><span>${label} 금액</span><strong>${formatWon(totalAll)}</strong></div>`;
   }
 
   const items = prefs.manual.works ? [...scope] : [...scope].sort((a, b) =>
@@ -1644,7 +1732,7 @@ function renderWorks() {
     // 상태 셀렉트 (변경용)
     const sel = document.createElement('select'); sel.className = 'mini-select dl-status';
     for (const st of WORK_STATUS) { const o = document.createElement('option'); o.value = st; o.textContent = st; if (it.status === st) o.selected = true; sel.appendChild(o); }
-    sel.addEventListener('change', () => { it.status = sel.value; it.done = sel.value === '완료'; scheduleSave(); renderWorks(); });
+    sel.addEventListener('change', () => { it.status = sel.value; it.done = sel.value === '완료'; setWorkPaid(it, it.done); }); // 완료 → 가계부 수입 자동 기록(해제 시 회수). 저장·재렌더는 setWorkPaid가
 
     // 우측: 금액(우측정렬) + D-day 배지
     const right = document.createElement('div'); right.className = 'dl-right';
@@ -1654,17 +1742,7 @@ function renderWorks() {
 
     const del = document.createElement('button'); del.className = 'mini-del'; del.textContent = '×';
     del.addEventListener('click', () => deleteWork(it.id));
-    row.append(body, sel, right);
-    if (Number(it.amount) > 0) {
-      const paidBtn = document.createElement('button');
-      paidBtn.type = 'button';
-      paidBtn.className = 'dl-paid' + (it.paid ? ' on' : '');
-      paidBtn.textContent = it.paid ? '입금완료' : '미수금';
-      paidBtn.title = '클릭하면 입금 상태 전환 (입금 시 가계부 수입 자동 기록)';
-      paidBtn.addEventListener('click', (e) => { e.stopPropagation(); setWorkPaid(it, !it.paid); });
-      row.append(paidBtn);
-    }
-    row.append(del);
+    row.append(body, sel, right, del); // 입금/미수금 버튼 제거 — 완료 상태가 곧 가계부 수입
     list.appendChild(row);
   }
   filterCurrentRows();
@@ -1708,7 +1786,6 @@ function openWorkModal(id) {
   $('#w-status').value = (w && WORK_STATUS.includes(w.status)) ? w.status : '대기';
   $('#w-due').value = w ? (w.due || '') : ymd(new Date()); // 신규 기본 마감 = 오늘
   $('#w-notes').value = w ? (w.notes || '') : '';
-  const wp = $('#w-paid'); if (wp) wp.checked = w ? !!w.paid : false;
   $('#work-modal').hidden = false;
   setTimeout(() => $('#w-title').focus(), 30);
 }
@@ -1729,7 +1806,7 @@ function saveWorkModal() {
     notes: $('#w-notes').value.trim(),
   });
   disarmPastWorkReminders(w); // 과거 마감으로 바꾼 알림은 다시 안 울리게
-  setWorkPaid(w, $('#w-paid') ? $('#w-paid').checked : !!w.paid); // 입금 상태 반영 + 가계부 연동 + 저장/렌더
+  setWorkPaid(w, status === '완료'); // 완료 = 가계부 수입 자동 기록(해제 시 회수) + 저장/렌더
   closeWorkModal();
 }
 // 작업 삭제 — 입금 연동으로 만들어진 가계부 수입도 함께 회수(유령 수입 방지)
@@ -2257,6 +2334,7 @@ function bindUI() {
     if (e.key !== 'Escape') return;
     if (!$('#modal').hidden) closeModal();
     else if ($('#work-modal') && !$('#work-modal').hidden) closeWorkModal();
+    else if ($('#ledger-modal') && !$('#ledger-modal').hidden) closeLedgerModal();
     else if ($('#recurring-modal') && !$('#recurring-modal').hidden) closeRecurringModal();
     else if (!$('#settings-modal').hidden) closeSettingsModal();
     else if (!$('#banner-modal').hidden) closeBannerModal();
@@ -2394,8 +2472,8 @@ function bindUI() {
   $('#recurring-form').addEventListener('submit', (e) => {
     e.preventDefault();
     const v = $('#recurring-input').value.trim(); if (!v) return;
-    recurring.unshift({ id: crypto.randomUUID(), title: v, rule: $('#recurring-rule').value, lastDone: '' });
-    $('#recurring-input').value = ''; scheduleSave(); renderRecurring();
+    recurring.unshift({ id: crypto.randomUUID(), title: v, rule: $('#recurring-rule').value });
+    $('#recurring-input').value = ''; scheduleSave(); renderRecurring(); render(); // 달력에도 바로 반영
   });
 
   const alarmForm = $('#alarm-form');
@@ -2410,23 +2488,15 @@ function bindUI() {
     toast('알람을 추가했어요.');
   });
 
-  // 가계부
-  // 가계부 수입/지출 토글
-  $('#l-type-toggle').querySelectorAll('.seg-btn').forEach((b) => {
-    b.addEventListener('click', () => {
-      ledgerType = b.dataset.t;
-      $('#l-type-toggle').querySelectorAll('.seg-btn').forEach((x) => x.classList.toggle('on', x === b));
-    });
-  });
-  $('#ledger-form').addEventListener('submit', (e) => {
-    e.preventDefault();
-    const amount = Number($('#l-amount').value);
-    const date = $('#l-date').value || ymd(new Date());
-    if (!amount) { toast('금액을 입력하세요.'); return; }
-    ledger.unshift({ id: crypto.randomUUID(), date, type: ledgerType, amount, category: $('#l-category').value.trim(), memo: $('#l-memo').value.trim() });
-    $('#l-amount').value = ''; $('#l-category').value = ''; $('#l-memo').value = '';
-    scheduleSave(); renderLedger();
-  });
+  // 가계부 — '+ 내역 추가' → 라벨형 모달 (작업관리와 같은 방식)
+  const ledgerAdd = $('#ledger-add'); if (ledgerAdd) ledgerAdd.addEventListener('click', () => openLedgerModal(null));
+  const lmForm = $('#ledger-modal-form'); if (lmForm) lmForm.addEventListener('submit', (e) => { e.preventDefault(); saveLedgerModal(); });
+  const lmClose = $('#ledger-close'); if (lmClose) lmClose.addEventListener('click', closeLedgerModal);
+  const lmCancel = $('#lm-cancel'); if (lmCancel) lmCancel.addEventListener('click', closeLedgerModal);
+  const lmDel = $('#lm-del'); if (lmDel) lmDel.addEventListener('click', () => { if (editingLedgerId) { ledger = ledger.filter((x) => x.id !== editingLedgerId); scheduleSave(); renderLedger(); } closeLedgerModal(); });
+  const lmModal = $('#ledger-modal'); if (lmModal) lmModal.addEventListener('click', (e) => { if (e.target === lmModal) closeLedgerModal(); });
+  const lmToggle = $('#lm-type-toggle');
+  if (lmToggle) lmToggle.querySelectorAll('.seg-btn').forEach((b) => b.addEventListener('click', () => setLedgerModalType(b.dataset.t)));
   $('#ledger-month').addEventListener('change', renderLedger);
 
   // 작업 월 필터
@@ -2484,6 +2554,15 @@ function bindUI() {
   enableReorder($('#todo-list'), '.mini-item', (ids) => { todos = reorderByIds(todos, ids); scheduleSave(); renderTodos(); });
   enableReorder($('#recurring-list'), '.mini-item', (ids) => { recurring = reorderByIds(recurring, ids); scheduleSave(); renderRecurring(); });
   enableEventDrag(); // 일정 블록 꾹 눌러 드래그로 시간/요일 이동
+  // 우클릭 → 삭제 (모든 사용자 목록). works/events는 부수효과 있는 전용 삭제 함수 경유.
+  enableContextDelete($('#todo-list'), '.mini-item', (id) => { todos = todos.filter((x) => x.id !== id); scheduleSave(); renderTodos(); });
+  enableContextDelete($('#recurring-list'), '.mini-item', (id) => { recurring = recurring.filter((x) => x.id !== id); scheduleSave(); renderRecurring(); });
+  enableContextDelete($('#alarm-list'), '.mini-item', (id) => { alarms = alarms.filter((x) => x.id !== id); scheduleSave(); renderAlarms(); });
+  enableContextDelete($('#ledger-list'), '.ledger-row', (id) => { ledger = ledger.filter((x) => x.id !== id); scheduleSave(); renderLedger(); });
+  enableContextDelete($('#deadline-list'), '.deadline-row', (id) => deleteWork(id));
+  enableContextDelete($('#notes-grid'), '.note-card', (id) => { notes = notes.filter((x) => x.id !== id); scheduleSave(); renderNotes(); });
+  enableContextDelete($('#yt-list'), '.yt-row', (id) => { playlist = playlist.filter((x) => x.id !== id); if (ytCurrent === id) ytStop(); scheduleSave(); renderYouTube(); });
+  enableContextDelete($('#day-cols'), '.event', (id) => deleteEvent(id));
   // "자동 정렬" 복귀 버튼
   const autoBtn = (sel, key, render) => { const b = $(sel); if (b) b.addEventListener('click', () => { prefs.manual[key] = false; scheduleSave(); render(); }); };
   autoBtn('#ledger-auto', 'ledger', renderLedger);

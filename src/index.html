@@ -107,6 +107,7 @@
             <div class="cal-head" id="cal-head">
               <div class="time-gutter-head"></div>
             </div>
+            <div class="cal-allday" id="cal-allday" hidden></div>
             <div class="cal-body" id="cal-body">
               <div class="time-gutter" id="time-gutter"></div>
               <div class="day-cols" id="day-cols"></div>
@@ -163,23 +164,11 @@
           <div class="month-filter">
             <input type="month" id="ledger-month" class="mini-select" />
             <button class="soft-btn" id="ledger-auto" title="날짜순 자동 정렬">자동 정렬</button>
+            <button class="add-btn" id="ledger-add">+ 내역 추가</button>
           </div>
         </div>
         <div class="ledger-summary" id="ledger-summary"></div>
         <div class="ledger-stats" id="ledger-stats" hidden></div>
-        <form id="ledger-form" class="ledger-form" autocomplete="off">
-          <label class="lf-field"><span>구분</span>
-            <div class="seg-toggle" id="l-type-toggle">
-              <button type="button" class="seg-btn income" data-t="income">수입</button>
-              <button type="button" class="seg-btn expense on" data-t="expense">지출</button>
-            </div>
-          </label>
-          <label class="lf-field f-date"><span>날짜</span><input id="l-date" type="date" required /></label>
-          <label class="lf-field f-amount"><span>금액</span><input id="l-amount" type="number" min="0" step="1" placeholder="0" required /></label>
-          <label class="lf-field f-cat"><span>분류</span><input id="l-category" type="text" maxlength="20" placeholder="식비 등" /></label>
-          <label class="lf-field grow"><span>메모</span><input id="l-memo" type="text" maxlength="60" placeholder="메모(선택)" /></label>
-          <button type="submit" class="add-btn lf-add">추가</button>
-        </form>
         <div class="ledger-list" id="ledger-list"></div>
       </section>
 
@@ -550,10 +539,6 @@
           </label>
           <label class="field"><span>마감</span><input id="w-due" type="date" required /></label>
         </div>
-        <label class="field-check">
-          <input id="w-paid" type="checkbox" />
-          <span>입금완료 <em>— 체크하면 금액을 가계부 ‘수입’으로 자동 기록</em></span>
-        </label>
         <label class="field">
           <span>메모</span>
           <textarea id="w-notes" rows="3" placeholder="메모 (선택)"></textarea>
@@ -562,6 +547,37 @@
           <button type="button" class="soft-btn danger" id="work-del">삭제</button>
           <span class="spacer"></span>
           <button type="button" class="soft-btn" id="work-cancel">취소</button>
+          <button type="submit" class="add-btn">저장</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============ 가계부 내역 추가/수정 모달 ============ -->
+  <div class="modal-overlay" id="ledger-modal" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h2 id="ledger-modal-title">내역 추가</h2>
+        <button class="icon-btn ghost" id="ledger-close" aria-label="닫기">✕</button>
+      </div>
+      <form id="ledger-modal-form" class="modal-body" autocomplete="off">
+        <label class="field">
+          <span>구분</span>
+          <div class="seg-toggle" id="lm-type-toggle">
+            <button type="button" class="seg-btn income" data-t="income">수입</button>
+            <button type="button" class="seg-btn expense on" data-t="expense">지출</button>
+          </div>
+        </label>
+        <div class="field-row">
+          <label class="field"><span>날짜</span><input id="lm-date" type="date" required /></label>
+          <label class="field"><span>금액</span><input id="lm-amount" type="number" min="0" step="1" placeholder="0" required /></label>
+        </div>
+        <label class="field"><span>분류</span><input id="lm-category" type="text" maxlength="20" placeholder="식비 등" /></label>
+        <label class="field"><span>메모</span><input id="lm-memo" type="text" maxlength="60" placeholder="메모 (선택)" /></label>
+        <div class="modal-actions">
+          <button type="button" class="soft-btn danger" id="lm-del" hidden>삭제</button>
+          <span class="spacer"></span>
+          <button type="button" class="soft-btn" id="lm-cancel">취소</button>
           <button type="submit" class="add-btn">저장</button>
         </div>
       </form>

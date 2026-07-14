@@ -196,14 +196,16 @@ function restoreWindowState() {
       out.width = Math.round(s.width); out.height = Math.round(s.height);
     }
     if (Number.isFinite(s.x) && Number.isFinite(s.y)) {
-      // 저장된 위치가 '주(primary) 모니터' 작업영역과 겹칠 때만 복원.
-      // 보조 모니터/화면 밖 좌표면 무시 → Electron이 주 모니터 중앙에 배치(창을 잃어버리지 않게).
+      // 저장 위치가 '연결된 어느 모니터'의 작업영역과라도 겹치면 복원(보조 모니터 위치도 그대로).
+      // 모든 화면 밖(모니터 분리 등)일 때만 무시 → 주 모니터 중앙에 배치(창을 잃어버리지 않게).
       try {
         const { screen } = require('electron');
         const w = out.width || 960, h = out.height || 720;
-        const a = screen.getPrimaryDisplay().workArea;
-        const onPrimary = s.x < a.x + a.width && s.x + w > a.x && s.y < a.y + a.height && s.y + h > a.y;
-        if (onPrimary) { out.x = Math.round(s.x); out.y = Math.round(s.y); }
+        const onAny = screen.getAllDisplays().some((disp) => {
+          const a = disp.workArea;
+          return s.x < a.x + a.width && s.x + w > a.x && s.y < a.y + a.height && s.y + h > a.y;
+        });
+        if (onAny) { out.x = Math.round(s.x); out.y = Math.round(s.y); }
       } catch (_) {}
     }
     return out;
@@ -510,14 +512,17 @@ function ytPlayJs(vol) {
   // 소리 차단(광고/다른 곡)은 메인 프로세스의 setAudioMuted가 담당 → 여기선 v.muted 미사용.
   return "(function(){" +
     "window.__ytvol=" + vol + ";" +
+    // 볼륨 설정 헬퍼: 플레이어 API(mp.setVolume)로 '플레이어 자체 볼륨'을 사용자값으로 → 로드 시 유튜브가 100으로 덮는 것 방지. video.volume도 폴백.
+    "window.__setvol=function(){try{var mp=document.querySelector('#movie_player');if(mp&&mp.setVolume){mp.setVolume(Math.round((window.__ytvol||0)*100));if((window.__ytvol||0)>0&&mp.isMuted&&mp.isMuted()&&mp.unMute){mp.unMute();}}var vs=document.querySelectorAll('video');for(var i=0;i<vs.length;i++){vs[i].volume=window.__ytvol;}}catch(e){}};" +
     "var v=document.querySelector('video');" +
     "if(v){v.volume=window.__ytvol; v.play&&v.play(); v.addEventListener('ended',function(){try{v.pause();}catch(e){}});}" +
+    "window.__setvol();" +
     "try{var b=document.querySelector('.ytp-autonav-toggle-button[aria-checked=\"true\"]'); if(b){b.click();}}catch(e){}" +
     "if(!window.__adskip){window.__adskip=setInterval(function(){try{" +
       "var mp=document.querySelector('#movie_player');" +
       "var p=document.querySelector('.html5-video-player');" +
       "var av=p?p.querySelector('video'):document.querySelector('video');" +
-      "if(av&&Math.abs(av.volume-window.__ytvol)>0.001){av.volume=window.__ytvol;}" +
+      "window.__setvol&&window.__setvol();" +
       "var adp=false; try{adp=!!(mp&&mp.getAdState&&mp.getAdState()===1);}catch(e){}" +
       "if(adp||(p&&p.classList.contains('ad-showing'))){" +
         "var s=document.querySelector('.ytp-ad-skip-button,.ytp-ad-skip-button-modern,.ytp-skip-ad-button,.ytp-ad-skip-button-slot button,.ytp-ad-skip-button-container button');" +
@@ -599,7 +604,8 @@ ipcMain.handle('youtube:play', async (_e, url) => {
 //  ③ 곡 종료 시 정지+다음곡
 let ytPoll = null;
 let ytMuteStreak = 0; // 음소거 게이트 히스테리시스: 광고/다른곡이 연속 확인될 때만 음소거(순간 오탐 무시)
-function stopYtPoll() { if (ytPoll) { clearInterval(ytPoll); ytPoll = null; } ytMuteStreak = 0; }
+let ytUnmuteWait = 0; // 초반 풀볼륨 구간 음소거 유지 카운터(볼륨 확정 전 해제 방지, 8틱 안전상 해제)
+function stopYtPoll() { if (ytPoll) { clearInterval(ytPoll); ytPoll = null; } ytMuteStreak = 0; ytUnmuteWait = 0; }
 function startYtPoll() {
   stopYtPoll();
   ytPoll = setInterval(async () => {
@@ -613,18 +619,23 @@ function startYtPoll() {
         "try{ad=!!(mp&&mp.getAdState&&mp.getAdState()===1);}catch(e){}" +
         "try{vid=(mp&&mp.getVideoData&&mp.getVideoData().video_id)||'';}catch(e){}" +
         "if(!ad){var p=document.querySelector('.html5-video-player');ad=!!(p&&p.classList.contains('ad-showing'));}" +
-        "try{document.querySelectorAll('video').forEach(function(x){x.volume=window.__ytvol;});}catch(e){}" + // 모든 video 볼륨 상시 고정(음소거 해제 순간 풀볼륨 터짐 방지)
-        "return {ended:v?v.ended:false,d:v?v.duration:0,ad:ad,vid:vid};" +
+        "try{if(window.__setvol){window.__setvol();}else{var vv=document.querySelectorAll('video');for(var i=0;i<vv.length;i++)vv[i].volume=window.__ytvol;}}catch(e){}" + // 볼륨 상시(플레이어 API + video)
+        "return {ended:v?v.ended:false,d:v?v.duration:0,ad:ad,vid:vid,vol:(v?v.volume:window.__ytvol)};" +
         "})();"
       );
       if (!st) return;
       const drift = !!(ytExpectedId && st.vid && st.vid !== ytExpectedId);
-      // 음소거 게이트: 광고는 즉시 음소거(본편보다 큰 광고음 누출 방지), 지정 영상 재생 중이면 즉시 소리.
-      // 다른 곡(오토플레이 등)만 2틱(≈500ms) 지연 음소거. vid가 순간 비거나 전환 중이면 현재 상태 유지(플래핑 방지).
+      // 음소거 게이트: 광고는 즉시 음소거. 지정 영상이라도 초반 볼륨이 사용자값보다 크면(유튜브가 100으로 덮는 구간)
+      // 음소거를 유지해 큰 소리를 감춘 뒤, 볼륨이 사용자값으로 내려오면 소리 냄. (8틱≈2s 지나면 안전상 해제)
       const positived = ytExpectedId ? (st.vid === ytExpectedId && !st.ad) : (!!st.vid && !st.ad);
-      if (st.ad) { ytMuteStreak = 0; try { ytWindow.webContents.setAudioMuted(true); } catch (_) {} }
-      else if (positived) { ytMuteStreak = 0; try { ytWindow.webContents.setAudioMuted(false); } catch (_) {} }
-      else if (drift) { ytMuteStreak++; if (ytMuteStreak >= 2) { try { ytWindow.webContents.setAudioMuted(true); } catch (_) {} } }
+      const tooLoud = (typeof st.vol === 'number') && (st.vol > ytVolume + 0.03);
+      if (st.ad) { ytMuteStreak = 0; ytUnmuteWait = 0; try { ytWindow.webContents.setAudioMuted(true); } catch (_) {} }
+      else if (positived) {
+        if (tooLoud && ytUnmuteWait < 8) { ytUnmuteWait++; } // 초반 풀볼륨 구간은 음소거 유지(큰 소리 감춤)
+        else { ytMuteStreak = 0; ytUnmuteWait = 0; try { ytWindow.webContents.setAudioMuted(false); } catch (_) {} }
+      }
+      else if (drift) { ytUnmuteWait = 0; ytMuteStreak++; if (ytMuteStreak >= 2) { try { ytWindow.webContents.setAudioMuted(true); } catch (_) {} } }
+      else { ytUnmuteWait = 0; }
       if (drift && !ytEndedSent) {
         ytEndedSent = true;
         stopYtPoll();
@@ -662,7 +673,7 @@ ipcMain.handle('youtube:setVolume', async (_e, v) => {
   const n = Number(v);
   if (!Number.isFinite(n)) return { ok: false, error: 'BAD_VOLUME' };
   ytVolume = Math.max(0, Math.min(100, Math.round(n))) / 100;
-  await ytExec("window.__ytvol=" + ytVolume + ";var v=document.querySelector('video'); if(v){v.volume=" + ytVolume + ";}");
+  await ytExec("window.__ytvol=" + ytVolume + "; if(window.__setvol){window.__setvol();} else {var v=document.querySelector('video'); if(v){v.volume=" + ytVolume + ";}}");
   return { ok: true };
 });
 
