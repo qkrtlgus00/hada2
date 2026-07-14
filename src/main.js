@@ -275,13 +275,9 @@ function createWindow(useFileFallback) {
   if (useFileFallback) mainWindow.loadFile(path.join(__dirname, 'index.html'));
   else mainWindow.loadURL(`${appBaseUrl}/index.html`);
 
-  // 창 닫기 → 종료 대신 트레이로 숨김(음악 계속). 진짜 종료는 트레이 메뉴/Alt+F4 후 isQuitting.
-  mainWindow.on('close', (e) => {
-    saveWindowState(); // 닫기/종료 직전 크기·위치 저장
-    if (!app.isQuitting && tray) {
-      e.preventDefault();
-      mainWindow.hide();
-    }
+  // 창(X)을 닫으면 완전히 종료 (트레이 상주 안 함). 닫기 직전 크기·위치 저장.
+  mainWindow.on('close', () => {
+    saveWindowState();
   });
 
   mainWindow.on('closed', () => {
@@ -735,7 +731,7 @@ app.whenReady().then(async () => {
     console.error('로컬 서버 시작 실패, file:// 로 폴백:', e);
   }
   createWindowSafe();
-  try { createTray(); } catch (e) { console.error('트레이 생성 실패:', e); }
+  // 트레이 상주 제거: createTray()를 호출하지 않음 → tray=null → 창을 닫으면 완전 종료.
 
   // 설치본(패키지)에서만 electron-updater로 자동 업데이트 (폴더판은 기존 파일 덮어쓰기 방식 유지).
   // require를 isPackaged 안에서 지연 로드 + try — 폴더판엔 electron-updater 모듈이 없어도 안전.
@@ -784,7 +780,7 @@ function createWindowSafe() {
 }
 
 app.on('window-all-closed', () => {
-  // 트레이 상주 중엔 창을 닫아도 종료하지 않음(음악 유지). 트레이 없으면 기존 동작.
+  // 트레이를 안 쓰므로(tray=null) 창을 모두 닫으면 앱 종료 (macOS 제외).
   if (process.platform !== 'darwin' && !tray) {
     app.quit();
   }
