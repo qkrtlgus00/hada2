@@ -598,7 +598,8 @@ ipcMain.handle('youtube:play', async (_e, url) => {
 //  ② 오토플레이가 다른 곡을 틀면(드리프트) 즉시 정지+다음 지정곡
 //  ③ 곡 종료 시 정지+다음곡
 let ytPoll = null;
-function stopYtPoll() { if (ytPoll) { clearInterval(ytPoll); ytPoll = null; } }
+let ytMuteStreak = 0; // 음소거 게이트 히스테리시스: 광고/다른곡이 연속 확인될 때만 음소거(순간 오탐 무시)
+function stopYtPoll() { if (ytPoll) { clearInterval(ytPoll); ytPoll = null; } ytMuteStreak = 0; }
 function startYtPoll() {
   stopYtPoll();
   ytPoll = setInterval(async () => {
@@ -617,9 +618,12 @@ function startYtPoll() {
       );
       if (!st) return;
       const drift = !!(ytExpectedId && st.vid && st.vid !== ytExpectedId);
-      // 지정 영상이 광고 없이 재생될 때만 소리 (기대 ID 없으면 광고만 아니면 허용)
-      const confirmed = ytExpectedId ? (st.vid === ytExpectedId && !st.ad) : !st.ad;
-      try { ytWindow.webContents.setAudioMuted(!confirmed); } catch (_) {}
+      // 음소거 게이트: 지정 영상이 광고 없이 재생 중이면 즉시 소리(positive), 광고/다른곡이 2틱(≈500ms)
+      // 이어질 때만 음소거. vid가 순간 비거나(버퍼링/시크/곡경계) 전환 중이면 현재 상태 유지 → 소리 플래핑 방지.
+      const positived = ytExpectedId ? (st.vid === ytExpectedId && !st.ad) : (!!st.vid && !st.ad);
+      const adOrOther = st.ad || drift;
+      if (positived) { ytMuteStreak = 0; try { ytWindow.webContents.setAudioMuted(false); } catch (_) {} }
+      else if (adOrOther) { ytMuteStreak++; if (ytMuteStreak >= 2) { try { ytWindow.webContents.setAudioMuted(true); } catch (_) {} } }
       if (drift && !ytEndedSent) {
         ytEndedSent = true;
         stopYtPoll();

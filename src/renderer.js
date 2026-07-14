@@ -57,6 +57,7 @@ let miniMonth = new Date(); // 미니 달력이 보는 달
 let weekStart = startOfWeek(new Date()); // 현재 보는 주의 월요일
 let selectedDay = ymd(new Date()); // 할일이 보여줄 날짜(미니 달력에서 선택). 기본 오늘
 let dayCursor = ymd(new Date()); // 자정 넘김 감지용 마지막 처리 날짜
+let calMode = 'week'; // 일정 화면 보기: 'week'(이번주 주간표) | 'month'(전체 월 달력)
 let catFilter = 'all';
 let searchText = '';
 let editingId = null; // 모달이 수정 중인 이벤트 id (없으면 신규)
@@ -472,18 +473,22 @@ function visibleEventsForDate(dateStr) {
 
 // ---- 렌더 ----
 function render() {
-  $('#week-label').textContent = weekRangeLabel(weekStart);
   renderCatFilters();
   renderCatDatalist();
-  renderHead();
-  renderGutter();
-  renderDays();
-  renderNowLine();
-  // 일정 화면 왼쪽 패널
-  renderMiniCal();
-  renderTodos();
-  renderRecurring();
-  renderAlarms();
+  document.querySelectorAll('#cal-mode .seg-btn').forEach((b) => b.classList.toggle('on', b.dataset.mode === calMode));
+  const monthMode = (calMode === 'month');
+  const calEl = $('#calendar'); if (calEl) calEl.hidden = monthMode;
+  const monEl = $('#cal-month'); if (monEl) monEl.hidden = !monthMode;
+  if (monthMode) {
+    $('#week-label').textContent = `${miniMonth.getFullYear()}년 ${miniMonth.getMonth() + 1}월`;
+    renderMonth();
+  } else {
+    $('#week-label').textContent = weekRangeLabel(weekStart);
+    renderHead();
+    renderGutter();
+    renderDays();
+    renderNowLine();
+  }
 }
 
 function renderCatFilters() {
@@ -614,6 +619,35 @@ function renderNowLine() {
   });
 }
 
+// ---- 월간 달력 (전체 보기) ----
+function renderMonth() {
+  const grid = $('#cal-month-grid'); if (!grid) return;
+  const y = miniMonth.getFullYear(), m = miniMonth.getMonth();
+  grid.innerHTML = '';
+  const today = ymd(new Date());
+  for (const c of monthGrid(y, m)) {
+    const cellYmd = `${c.y}-${String(c.m + 1).padStart(2, '0')}-${String(c.d).padStart(2, '0')}`;
+    const cell = document.createElement('div');
+    cell.className = 'cal-cell' + (c.inMonth ? '' : ' out') + (cellYmd === today ? ' today' : '');
+    const num = document.createElement('div'); num.className = 'cal-cell-num'; num.textContent = c.d;
+    cell.appendChild(num);
+    const evs = visibleEventsForDate(cellYmd);
+    for (const ev of evs.slice(0, 4)) {
+      const [bg, fg] = categoryColor(ev.category);
+      const chip = document.createElement('div'); chip.className = 'cal-chip';
+      chip.style.background = bg; chip.style.color = fg;
+      chip.textContent = ev.title;
+      chip.title = `${fmt12(ev.start)} ${ev.title}`;
+      chip.addEventListener('click', (e) => { e.stopPropagation(); openModal(ev.id); });
+      cell.appendChild(chip);
+    }
+    if (evs.length > 4) { const more = document.createElement('div'); more.className = 'cal-more'; more.textContent = `+${evs.length - 4}개`; cell.appendChild(more); }
+    // 날짜칸 클릭 → 그 주로 이동 + 이번주로 전환
+    cell.addEventListener('click', () => { selectedDay = cellYmd; weekStart = startOfWeek(new Date(c.y, c.m, c.d)); calMode = 'week'; prefs.calMode = 'week'; scheduleSave(); render(); });
+    grid.appendChild(cell);
+  }
+}
+
 // ---- 모달 ----
 function openModal(id, prefill) {
   editingId = id || null;
@@ -630,6 +664,8 @@ function openModal(id, prefill) {
   $('#f-notes').value = ev ? ev.notes : '';
   const fr = $('#f-remind'); if (fr) fr.value = (ev && ev.remindMin != null) ? String(ev.remindMin) : '';
 
+  renderRecurring(); // 모달 안 반복 목록(모든 반복 규칙 관리)
+  renderAlarms();    // 모달 안 알람 목록
   $('#modal').hidden = false;
   setTimeout(() => $('#f-title').focus(), 30);
 }
@@ -946,9 +982,7 @@ function setView(view) {
   document.querySelectorAll('[data-view]').forEach((el) => { el.hidden = el.dataset.view !== view; });
   const hdr = document.querySelector('.schedule-header');
   if (hdr) hdr.hidden = view !== 'calendar';
-  // 뷰 색을 CSS 변수로 주입 (사이드바 활성 탭 + 페이지 상단이 이 색을 공유)
-  const accent = viewAccent(view);
-  document.documentElement.style.setProperty('--view-accent', accent);
+  // 강조색은 모든 탭이 공유(--view-accent = var(--primary), styles.css 기본값) — 탭별 색 통합
   renderSidebarStats();
   renderStickers();
 }
@@ -981,6 +1015,7 @@ function showView(name) {
   else if (name === 'ledger') renderLedger();
   else if (name === 'deadlines') renderWorks();
   else if (name === 'notes') renderNotes();
+  else if (name === 'todos') renderTodos();
   else if (name === 'habits') renderHabits();
   else if (name === 'youtube') renderYouTube();
 }
@@ -1049,6 +1084,7 @@ function applyColors(c) {
     const t = idealText(c.sidebar);
     const { r, g, b } = hexToRgb(t);
     root.setProperty('--sidebar-bg', c.sidebar);
+    root.setProperty('--sidebar-bg-2', mix(c.sidebar, '#000000', 0.10)); // 아랫부분 고정색 제거 → 사이드바 전체 선택색
     root.setProperty('--sidebar-text', t);
     root.setProperty('--sidebar-text-dim', `rgba(${r},${g},${b},0.62)`);
     root.setProperty('--sidebar-active-bg', `rgba(${r},${g},${b},0.14)`);
@@ -1071,11 +1107,11 @@ function applyColors(c) {
 function saveColors() { prefs.colors = colors; try { localStorage.setItem('colors', JSON.stringify(colors)); } catch (_) {} scheduleSave(); }
 function resetColors() {
   colors = {};
-  ['--accent', '--primary', '--accent-text', '--sidebar-bg', '--sidebar-text', '--sidebar-text-dim',
+  ['--accent', '--primary', '--accent-text', '--sidebar-bg', '--sidebar-bg-2', '--sidebar-text', '--sidebar-text-dim',
     '--sidebar-active-bg', '--page-bg', '--panel', '--panel-2', '--text', '--text-dim', '--text-mute']
     .forEach((v) => document.documentElement.style.removeProperty(v));
   prefs.viewColors = {};
-  document.documentElement.style.setProperty('--view-accent', viewAccent(currentView)); // 현재 뷰 색 복구
+  document.documentElement.style.removeProperty('--view-accent'); // CSS 기본값(var(--primary))으로 — 탭 색 통합
   saveColors();
   openSettingsModal(); // 입력값 갱신
   toast('기본 색상으로 되돌렸어요.');
@@ -1131,7 +1167,6 @@ function openSettingsModal() {
   setColorInput('#c-pagebg', 'pageBg', '--page-bg');
   setColorInput('#c-panel', 'panel', '--panel');
   setColorInput('#c-text', 'text', '--text');
-  renderViewColorPickers();
   syncShellControls();
   $('#settings-modal').hidden = false;
 }
@@ -1230,6 +1265,7 @@ function maybeRollDay() {
   if (wasOnToday) selectedDay = today;
   if (moved) scheduleSave();
   render();
+  renderTodos(); // 투두리스트 탭도 자정 롤오버 반영
 }
 // 할일 카드 상단 날짜 라벨 (오늘이면 '오늘 ·' 접두)
 function todoDayLabel(dayStr) {
@@ -1250,6 +1286,7 @@ function renderTodos() {
   for (const t of dayTodos) {
     const li = document.createElement('li');
     li.className = 'mini-item' + (t.done ? ' done' : '');
+    li.dataset.id = t.id; // 꾹 눌러 순서 변경용
     const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = t.done;
     cb.addEventListener('change', () => { t.done = cb.checked; scheduleSave(); renderTodos(); });
     const sp = document.createElement('span'); sp.className = 'mini-item-text'; sp.textContent = t.title;
@@ -1271,14 +1308,14 @@ function recSyncLastDone(r) { const t = ymd(new Date()); r.lastDone = (r.done &&
 function renderRecurring() {
   const list = $('#recurring-list'); if (!list) return;
   list.innerHTML = '';
-  const day = selectedDay; // 선택한 날짜에 해당하는 반복만 표시
+  const day = ymd(new Date()); // 완료 체크는 오늘 기준 (모달의 관리 목록 — 모든 반복 규칙 표시)
   for (const r of recurring) {
-    if (!recurringDueOn(r.rule, r.dates, day)) continue; // 그날 대상이 아니면 안 뜸
     const hasDates = r.dates && Object.keys(r.dates).length > 0;
     const map = recDoneMap(r);
     const doneOnDay = !!map[day];
     const li = document.createElement('li');
     li.className = 'mini-item' + (doneOnDay ? ' done' : '');
+    li.dataset.id = r.id; // 꾹 눌러 순서 변경용
     const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = doneOnDay;
     cb.addEventListener('change', () => { if (cb.checked) map[day] = true; else delete map[day]; recSyncLastDone(r); scheduleSave(); renderRecurring(); });
     const sp = document.createElement('span'); sp.className = 'mini-item-text rec-open'; sp.textContent = r.title; sp.title = '날짜 지정 달력 열기'; sp.style.cursor = 'pointer';
@@ -1445,6 +1482,12 @@ function renderHome() {
 }
 
 // ---- 가계부 ----
+// 가계부 날짜 그룹 라벨: "7월 14일 · 화"
+function ledgerDayLabel(dayStr) {
+  const [y, m, d] = String(dayStr).split('-').map(Number);
+  const dow = DOW_KO[(new Date(y, m - 1, d).getDay() + 6) % 7];
+  return `${m}월 ${d}일 · ${dow}`;
+}
 // 가계부 카테고리별 지출 통계 (도넛 + 막대). 라이브러리 없이 순수 CSS
 function renderLedgerStats(ym) {
   const box = $('#ledger-stats'); if (!box) return;
@@ -1483,36 +1526,40 @@ function renderLedger() {
   $('#ledger-summary').innerHTML =
     `<div class="lsum income"><span>수입</span><strong>${formatWon(s.income)}</strong></div>` +
     `<div class="lsum expense"><span>지출</span><strong>${formatWon(s.expense)}</strong></div>` +
-    `<div class="lsum balance"><span>잔액</span><strong>${formatWon(s.balance)}</strong></div>`;
+    `<div class="lsum balance ${s.balance >= 0 ? 'pos' : 'neg'}"><span>잔액</span><strong>${formatWon(s.balance)}</strong></div>`;
   renderLedgerStats(ym);
   const list = $('#ledger-list'); list.innerHTML = '';
   let items = ledger.filter((it) => monthKey(it.date) === ym);
   if (!prefs.manual.ledger) items = items.sort((a, b) => b.date.localeCompare(a.date));
   if (!items.length) { list.innerHTML = '<div class="empty-hint">이 달 내역이 없어요.</div>'; return; }
-  // 표 헤더 행 (참고의 ALL FILES 헤더)
-  const head = document.createElement('div');
-  head.className = 'ledger-row ledger-head';
-  head.innerHTML = '<span></span><span class="lr-date">날짜</span><span class="lr-cat">분류</span><span class="lr-memo">메모</span><span class="lr-amt">금액</span><span></span>';
-  list.appendChild(head);
+  // 날짜별 순합계(그룹 헤더에 표시)
+  const dayNet = {};
+  for (const it of items) dayNet[it.date] = (dayNet[it.date] || 0) + (it.type === 'income' ? 1 : -1) * (Number(it.amount) || 0);
+  let curDate = null;
   for (const it of items) {
+    // 날짜가 바뀌면 그룹 헤더 삽입 (반복 MM-DD 대신)
+    if (it.date !== curDate) {
+      curDate = it.date;
+      const net = dayNet[it.date] || 0;
+      const grp = document.createElement('div'); grp.className = 'ledger-daygrp';
+      const lab = document.createElement('span'); lab.className = 'ldg-label'; lab.textContent = ledgerDayLabel(it.date);
+      const ns = document.createElement('span'); ns.className = 'ldg-net ' + (net >= 0 ? 'pos' : 'neg');
+      ns.textContent = (net >= 0 ? '+' : '-') + formatWon(Math.abs(net));
+      grp.append(lab, ns);
+      list.appendChild(grp);
+    }
     const row = document.createElement('div');
     row.className = 'ledger-row ' + it.type;
     row.dataset.id = it.id;
-    const mk = (cls, txt) => { const s2 = document.createElement('span'); s2.className = cls; s2.textContent = txt; return s2; };
-    const ico = document.createElement('span');
-    ico.className = 'file-ico lr-ico';
-    ico.style.color = it.type === 'income' ? '#34a853' : '#ea4335';
-    ico.innerHTML = icon('wallet');
-    row.append(
-      ico,
-      mk('lr-date', it.date.slice(5)),
-      mk('lr-cat', it.category || (it.type === 'income' ? '수입' : '지출')),
-      mk('lr-memo', it.memo || ''),
-      mk('lr-amt', (it.type === 'income' ? '+' : '-') + formatWon(it.amount)),
-    );
+    const catName = it.category || (it.type === 'income' ? '수입' : '지출');
+    const [cbg, cfg] = categoryColor(catName); // 통계 도넛과 같은 색 언어
+    const cat = document.createElement('span'); cat.className = 'lr-cat'; cat.textContent = catName;
+    cat.style.background = cbg; cat.style.color = cfg;
+    const memo = document.createElement('span'); memo.className = 'lr-memo'; memo.textContent = it.memo || '';
+    const amt = document.createElement('span'); amt.className = 'lr-amt'; amt.textContent = (it.type === 'income' ? '+' : '-') + formatWon(it.amount);
     const del = document.createElement('button'); del.className = 'mini-del'; del.textContent = '×';
     del.addEventListener('click', () => { ledger = ledger.filter((x) => x.id !== it.id); scheduleSave(); renderLedger(); });
-    row.appendChild(del);
+    row.append(cat, memo, amt, del);
     list.appendChild(row);
   }
   filterCurrentRows();
@@ -1554,24 +1601,26 @@ function renderWorks() {
   for (const it of items) {
     const doneStatus = it.status === '완료';
     const n = it.due ? daysUntil(it.due, today) : null;
-    const row = document.createElement('div');
-    row.className = 'deadline-row' + (doneStatus ? ' done' : '');
-    row.dataset.id = it.id;
     let cls = '';
     if (!doneStatus && n !== null) { if (n < 0) cls = 'overdue'; else if (n === 0) cls = 'today'; else if (n <= 3) cls = 'soon'; }
+    const stKey = doneStatus ? 'done' : it.status === '진행중' ? 'prog' : 'wait';
 
-    const body = document.createElement('div'); body.className = 'dl-body';
-    const title = document.createElement('div'); title.className = 'dl-title'; title.textContent = it.title;
-    const metaBits = [];
-    if (it.client) metaBits.push(it.client);
-    if (it.contact) metaBits.push(it.contact);
-    if (it.platform) metaBits.push(it.platform);
-    if (it.type) metaBits.push(it.type);
-    if (it.amount) metaBits.push(formatWon(it.amount));
-    if (it.due) metaBits.push(it.due);
-    if (it.notes) metaBits.push(it.notes);
-    const sub = document.createElement('div'); sub.className = 'dl-sub'; sub.textContent = metaBits.join(' · ');
-    // 진행도
+    const row = document.createElement('div');
+    row.className = 'deadline-row' + (cls ? ' ' + cls : '') + (doneStatus ? ' done' : ''); // 임박(overdue/today/soon)을 행에도 → 왼쪽 색 띠
+    row.dataset.id = it.id;
+
+    const body = document.createElement('div'); body.className = 'dl-body dl-clickable';
+    // 제목줄: 상태 색점 + 제목
+    const titleRow = document.createElement('div'); titleRow.className = 'dl-titlerow';
+    const dot = document.createElement('span'); dot.className = 'dl-sdot st-' + stKey; dot.title = it.status || '대기';
+    const title = document.createElement('span'); title.className = 'dl-title'; title.textContent = it.title;
+    titleRow.append(dot, title);
+    // 정보줄: 클라이언트(강조) + 플랫폼/유형 칩 (연락처·메모는 편집 모달에서)
+    const sub = document.createElement('div'); sub.className = 'dl-sub';
+    if (it.client) { const c = document.createElement('span'); c.className = 'dl-client'; c.textContent = it.client; sub.appendChild(c); }
+    if (it.platform) { const p = document.createElement('span'); p.className = 'dl-chip'; p.textContent = it.platform; sub.appendChild(p); }
+    if (it.type) { const t = document.createElement('span'); t.className = 'dl-chip'; t.textContent = it.type; sub.appendChild(t); }
+    // 진행도 (슬림)
     const prog = document.createElement('div'); prog.className = 'dl-progress';
     const bar = document.createElement('div'); bar.className = 'dl-bar';
     const fill = document.createElement('div'); fill.className = 'dl-bar-fill';
@@ -1582,20 +1631,24 @@ function renderWorks() {
     const pctLabel = document.createElement('span'); pctLabel.className = 'dl-pct'; pctLabel.textContent = pct + '%';
     range.addEventListener('input', () => { it.progress = Number(range.value); fill.style.width = it.progress + '%'; pctLabel.textContent = it.progress + '%'; scheduleSave(); });
     prog.append(bar, range, pctLabel);
-    body.append(title, sub, prog);
+    body.append(titleRow, sub, prog);
     // 제목/정보줄 클릭 → 편집 모달 (진행률 슬라이더 영역은 제외)
-    body.classList.add('dl-clickable');
     body.addEventListener('click', (e) => { if (e.target.closest('.dl-progress')) return; openWorkModal(it.id); });
 
-    // 상태 셀렉트 (완료 체크 대체)
+    // 상태 셀렉트 (변경용)
     const sel = document.createElement('select'); sel.className = 'mini-select dl-status';
     for (const st of WORK_STATUS) { const o = document.createElement('option'); o.value = st; o.textContent = st; if (it.status === st) o.selected = true; sel.appendChild(o); }
     sel.addEventListener('change', () => { it.status = sel.value; it.done = sel.value === '완료'; scheduleSave(); renderWorks(); });
 
+    // 우측: 금액(우측정렬) + D-day 배지
+    const right = document.createElement('div'); right.className = 'dl-right';
+    if (Number(it.amount) > 0) { const a = document.createElement('span'); a.className = 'dl-amt'; a.textContent = formatWon(it.amount); right.appendChild(a); }
     const badge = document.createElement('span'); badge.className = 'dl-badge ' + cls; badge.textContent = doneStatus ? '완료' : (n === null ? '' : ddayLabel(n));
+    if (badge.textContent) right.appendChild(badge);
+
     const del = document.createElement('button'); del.className = 'mini-del'; del.textContent = '×';
     del.addEventListener('click', () => deleteWork(it.id));
-    row.append(body, sel);
+    row.append(body, sel, right);
     if (Number(it.amount) > 0) {
       const paidBtn = document.createElement('button');
       paidBtn.type = 'button';
@@ -1605,7 +1658,7 @@ function renderWorks() {
       paidBtn.addEventListener('click', (e) => { e.stopPropagation(); setWorkPaid(it, !it.paid); });
       row.append(paidBtn);
     }
-    row.append(badge, del);
+    row.append(del);
     list.appendChild(row);
   }
   filterCurrentRows();
@@ -2133,6 +2186,8 @@ async function importData() {
   if (d.prefs && typeof d.prefs === 'object') {
     prefs = { theme: 'light', colors: {}, appTitle: '하다', sidebarCollapsed: false, ...d.prefs };
     colors = prefs.colors || {};
+    prefs.calMode = (prefs.calMode === 'month') ? 'month' : 'week';
+    calMode = prefs.calMode;
     // 가져온 설정 정규화 (범위 밖 값 방지)
     prefs.ytVolume = clampInt(prefs.ytVolume, 0, 100, 100);
     prefs.windowOpacity = clampInt(prefs.windowOpacity, 15, 100, 100);
@@ -2216,9 +2271,16 @@ function bindUI() {
   const rn = $('#rec-next'); if (rn) rn.addEventListener('click', () => { recMonth = new Date(recMonth.getFullYear(), recMonth.getMonth() + 1, 1); renderRecGrid(); });
 
   $('#add-event-btn').addEventListener('click', () => openModal(null));
-  $('#prev-week').addEventListener('click', () => { weekStart = addDays(weekStart, -7); render(); });
-  $('#next-week').addEventListener('click', () => { weekStart = addDays(weekStart, 7); render(); });
-  $('#today-btn').addEventListener('click', () => { weekStart = startOfWeek(new Date()); render(); });
+  $('#prev-week').addEventListener('click', () => { if (calMode === 'month') miniMonth = new Date(miniMonth.getFullYear(), miniMonth.getMonth() - 1, 1); else weekStart = addDays(weekStart, -7); render(); });
+  $('#next-week').addEventListener('click', () => { if (calMode === 'month') miniMonth = new Date(miniMonth.getFullYear(), miniMonth.getMonth() + 1, 1); else weekStart = addDays(weekStart, 7); render(); });
+  $('#today-btn').addEventListener('click', () => { weekStart = startOfWeek(new Date()); miniMonth = new Date(); render(); });
+  // 전체(월 달력) / 이번주(주간표) 토글
+  document.querySelectorAll('#cal-mode .seg-btn').forEach((b) => b.addEventListener('click', () => {
+    calMode = (b.dataset.mode === 'month') ? 'month' : 'week';
+    prefs.calMode = calMode;
+    if (calMode === 'month') miniMonth = new Date(weekStart); // 보던 주가 속한 달로
+    scheduleSave(); render();
+  }));
 
 
   // 사이드바 메뉴 내비게이션 (Schedule=캘린더, 나머지=각 뷰)
@@ -2304,9 +2366,10 @@ function bindUI() {
   const hst = $('#pref-hide-sticker-tools');
   if (hst) hst.addEventListener('change', () => { prefs.hideStickerTools = hst.checked; document.body.classList.toggle('hide-sticker-tools', hst.checked); scheduleSave(); });
 
-  // 미니 달력 이동
-  $('#mini-prev').addEventListener('click', () => { miniMonth = new Date(miniMonth.getFullYear(), miniMonth.getMonth() - 1, 1); renderMiniCal(); });
-  $('#mini-next').addEventListener('click', () => { miniMonth = new Date(miniMonth.getFullYear(), miniMonth.getMonth() + 1, 1); renderMiniCal(); });
+  // 투두리스트 날짜 이동 (미니 달력 제거 → 날짜 스테퍼)
+  const todoStep = (delta) => { selectedDay = ymd(addDays(new Date(selectedDay + 'T00:00:00'), delta)); renderTodos(); };
+  const tprev = $('#todo-prev'); if (tprev) tprev.addEventListener('click', () => todoStep(-1));
+  const tnext = $('#todo-next'); if (tnext) tnext.addEventListener('click', () => todoStep(1));
 
   // 할일 (보고 있는 날짜에 추가)
   $('#todo-form').addEventListener('submit', (e) => {
@@ -2317,7 +2380,7 @@ function bindUI() {
   });
   // 할일 '오늘' 버튼: 오늘로 복귀
   const todoToday = $('#todo-today');
-  if (todoToday) todoToday.addEventListener('click', () => { selectedDay = ymd(new Date()); miniMonth = new Date(); weekStart = startOfWeek(new Date()); render(); });
+  if (todoToday) todoToday.addEventListener('click', () => { selectedDay = ymd(new Date()); renderTodos(); });
   // 반복
   $('#recurring-form').addEventListener('submit', (e) => {
     e.preventDefault();
@@ -2429,6 +2492,8 @@ function bindUI() {
   enableReorder($('#notes-grid'), '.note-card', (ids) => { notes = reorderByIds(notes, ids); scheduleSave(); renderNotes(); });
   enableReorder($('#ledger-list'), '.ledger-row', (ids) => { ledger = reorderByIds(ledger, ids); prefs.manual.ledger = true; scheduleSave(); renderLedger(); });
   enableReorder($('#deadline-list'), '.deadline-row', (ids) => { works = reorderByIds(works, ids); prefs.manual.works = true; scheduleSave(); renderWorks(); });
+  enableReorder($('#todo-list'), '.mini-item', (ids) => { todos = reorderByIds(todos, ids); scheduleSave(); renderTodos(); });
+  enableReorder($('#recurring-list'), '.mini-item', (ids) => { recurring = reorderByIds(recurring, ids); scheduleSave(); renderRecurring(); });
   enableEventDrag(); // 일정 블록 꾹 눌러 드래그로 시간/요일 이동
   // "자동 정렬" 복귀 버튼
   const autoBtn = (sel, key, render) => { const b = $(sel); if (b) b.addEventListener('click', () => { prefs.manual[key] = false; scheduleSave(); render(); }); };
@@ -2556,6 +2621,8 @@ async function init() {
   try { prefs.colors = p.colors || JSON.parse(lsGet('colors', '{}')) || {}; } catch (_) { prefs.colors = p.colors || {}; }
   prefs.viewColors = (p.viewColors && typeof p.viewColors === 'object') ? p.viewColors : {};
   prefs.ytRepeat = (p.ytRepeat === 'all' || p.ytRepeat === 'one') ? p.ytRepeat : 'off';
+  prefs.calMode = (p.calMode === 'month') ? 'month' : 'week';
+  calMode = prefs.calMode; // 일정 보기(전체/이번주) 복원
   // 수동 정렬 플래그: 구형 deadlines/commissions 플래그를 works 하나로 병합
   const pm = (p.manual && typeof p.manual === 'object') ? p.manual : {};
   prefs.manual = { ledger: !!pm.ledger, works: !!(pm.works || pm.deadlines || pm.commissions) };

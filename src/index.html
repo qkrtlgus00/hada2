@@ -41,6 +41,7 @@
         <ul>
           <li data-nav data-target="home"><span class="ico" data-icon="home"></span><span>홈</span></li>
           <li data-nav data-target="calendar" class="active"><span class="ico" data-icon="calendar"></span><span>일정</span></li>
+          <li data-nav data-target="todos"><span class="ico" data-icon="check"></span><span>투두리스트</span></li>
           <li data-nav data-target="ledger"><span class="ico" data-icon="wallet"></span><span>가계부</span></li>
           <li data-nav data-target="deadlines"><span class="ico" data-icon="clock"></span><span>작업 관리</span></li>
           <li data-nav data-target="notes"><span class="ico" data-icon="note"></span><span>메모</span></li>
@@ -82,75 +83,22 @@
 
       <!-- ============ 일정 화면 (좌: 미니달력·할일·반복 / 우: 주간 캘린더) ============ -->
       <div class="cal-layout" data-view="calendar">
-        <aside class="schedule-left">
-          <!-- 미니 월간 달력 -->
-          <div class="side-card mini-cal">
-            <div class="mini-cal-head">
-              <button class="wk-nav" id="mini-prev" aria-label="이전 달">‹</button>
-              <strong id="mini-label">2026년 7월</strong>
-              <button class="wk-nav" id="mini-next" aria-label="다음 달">›</button>
-            </div>
-            <div class="mini-dow"><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span><span>일</span></div>
-            <div class="mini-grid" id="mini-grid"></div>
-          </div>
-
-          <!-- 할일 -->
-          <div class="side-card">
-            <div class="side-card-head">
-              <h3>할일</h3>
-              <div class="todo-head-right">
-                <span id="todo-day-label" class="todo-day-label"></span>
-                <button type="button" id="todo-today" class="today-btn" hidden>오늘</button>
-                <span class="count" id="todo-count"></span>
-              </div>
-            </div>
-            <form id="todo-form" class="mini-add" autocomplete="off">
-              <input id="todo-input" type="text" maxlength="120" placeholder="할일 추가…" />
-              <button type="submit" class="add-btn">+</button>
-            </form>
-            <ul class="mini-list" id="todo-list"></ul>
-          </div>
-
-          <!-- 반복 목록 -->
-          <div class="side-card">
-            <div class="side-card-head"><h3>반복 목록</h3></div>
-            <form id="recurring-form" class="mini-add" autocomplete="off">
-              <input id="recurring-input" type="text" maxlength="120" placeholder="반복 항목…" />
-              <select id="recurring-rule" class="mini-select">
-                <option value="daily">매일</option>
-                <option value="weekday">평일</option>
-                <option value="weekly">매주</option>
-                <option value="monthly">매월</option>
-              </select>
-              <button type="submit" class="add-btn">+</button>
-            </form>
-            <ul class="mini-list" id="recurring-list"></ul>
-          </div>
-
-          <!-- 알람 (날짜+시간 지정 → 그 시각에 알림) -->
-          <div class="side-card">
-            <div class="side-card-head"><h3>알람</h3></div>
-            <form id="alarm-form" class="mini-add alarm-add" autocomplete="off">
-              <input id="alarm-when" type="datetime-local" />
-              <input id="alarm-input" type="text" maxlength="80" placeholder="알람 메모 (선택)" />
-              <button type="submit" class="add-btn">+</button>
-            </form>
-            <ul class="mini-list" id="alarm-list"></ul>
-          </div>
-        </aside>
-
         <div class="schedule-right">
           <section class="schedule-header">
             <div class="week-title">
-              <button class="wk-nav" id="prev-week" aria-label="이전 주">‹</button>
+              <div class="seg-toggle cal-mode" id="cal-mode">
+                <button type="button" class="seg-btn" data-mode="month">전체</button>
+                <button type="button" class="seg-btn on" data-mode="week">이번주</button>
+              </div>
+              <button class="wk-nav" id="prev-week" aria-label="이전">‹</button>
               <h1 id="week-label">01–07 January 2025</h1>
-              <button class="wk-nav" id="next-week" aria-label="다음 주">›</button>
+              <button class="wk-nav" id="next-week" aria-label="다음">›</button>
             </div>
             <div class="header-right">
               <div class="cat-filters" id="cat-filters">
                 <button class="pill active" data-cat="all">전체</button>
               </div>
-              <button class="soft-btn" id="today-btn">이번 주</button>
+              <button class="soft-btn" id="today-btn">오늘</button>
               <button class="add-btn" id="add-event-btn">+ 일정 추가</button>
             </div>
           </section>
@@ -164,8 +112,32 @@
               <div class="day-cols" id="day-cols"></div>
             </div>
           </section>
+
+          <section class="cal-month" id="cal-month" hidden>
+            <div class="cal-month-dow"><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span><span>일</span></div>
+            <div class="cal-month-grid" id="cal-month-grid"></div>
+          </section>
         </div>
       </div>
+
+      <!-- ============ 투두리스트 (날짜별 할일) ============ -->
+      <section class="view-pad" data-view="todos" id="todos-view" hidden>
+        <div class="view-head">
+          <h1 class="view-title">투두리스트</h1>
+          <div class="todo-date-nav">
+            <button class="wk-nav" id="todo-prev" aria-label="이전 날">‹</button>
+            <span id="todo-day-label" class="todo-day-label">오늘</span>
+            <button class="wk-nav" id="todo-next" aria-label="다음 날">›</button>
+            <button type="button" id="todo-today" class="soft-btn">오늘</button>
+            <span class="count" id="todo-count"></span>
+          </div>
+        </div>
+        <form id="todo-form" class="mini-add" autocomplete="off">
+          <input id="todo-input" type="text" maxlength="120" placeholder="할일 추가…" />
+          <button type="submit" class="add-btn">+</button>
+        </form>
+        <ul class="mini-list" id="todo-list"></ul>
+      </section>
 
       <!-- ============ 홈(대시보드) ============ -->
       <section class="view-pad" data-view="home" id="home-view" hidden>
@@ -325,11 +297,6 @@
         <div class="field">
           <span>프리셋</span>
           <div class="swatches" id="color-presets"></div>
-        </div>
-
-        <div class="field">
-          <span>탭 강조색 (탭 누를 때 뜨는 색)</span>
-          <div class="vc-list" id="view-color-list"></div>
         </div>
 
         <div class="field">
@@ -534,6 +501,33 @@
           <button type="submit" class="add-btn">저장</button>
         </div>
       </form>
+      <div class="modal-extra">
+        <!-- 알람 (날짜+시간 지정 → 그 시각에 알림) -->
+        <div class="modal-sub">
+          <div class="side-card-head"><h3>알람</h3></div>
+          <form id="alarm-form" class="mini-add alarm-add" autocomplete="off">
+            <input id="alarm-when" type="datetime-local" />
+            <input id="alarm-input" type="text" maxlength="80" placeholder="알람 메모 (선택)" />
+            <button type="submit" class="add-btn">+</button>
+          </form>
+          <ul class="mini-list" id="alarm-list"></ul>
+        </div>
+        <!-- 반복 목록 -->
+        <div class="modal-sub">
+          <div class="side-card-head"><h3>반복 목록</h3></div>
+          <form id="recurring-form" class="mini-add" autocomplete="off">
+            <input id="recurring-input" type="text" maxlength="120" placeholder="반복 항목…" />
+            <select id="recurring-rule" class="mini-select">
+              <option value="daily">매일</option>
+              <option value="weekday">평일</option>
+              <option value="weekly">매주</option>
+              <option value="monthly">매월</option>
+            </select>
+            <button type="submit" class="add-btn">+</button>
+          </form>
+          <ul class="mini-list" id="recurring-list"></ul>
+        </div>
+      </div>
     </div>
   </div>
 

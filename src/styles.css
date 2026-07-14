@@ -367,6 +367,10 @@ body.is-max #tb-max .i-restore { display: block; }
   cursor: pointer; font-size: 16px; line-height: 1;
 }
 .wk-nav:hover { background: var(--surface-2); color: var(--text); }
+/* 전체(월) / 이번주(주간) 토글 */
+.cal-mode { margin-right: 6px; }
+.cal-mode .seg-btn { padding: 6px 13px; font-size: 13px; font-weight: 600; }
+.cal-mode .seg-btn.on { background: var(--accent); color: var(--accent-text); font-weight: 700; }
 
 .header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .cat-filters { display: flex; gap: 4px; flex-wrap: wrap; }
@@ -597,6 +601,11 @@ body.is-max #tb-max .i-restore { display: block; }
 .modal-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
 .update-status { font-size: 12.5px; color: var(--text-dim); }
 .modal-actions .spacer { flex: 1; }
+/* 일정 모달 안 알람·반복 섹션 (본문 폼과 함께 스크롤) */
+.modal-body { flex: 1 1 auto; }
+.modal-extra { flex: 0 1 auto; min-height: 0; overflow-y: auto; max-height: 45vh; border-top: 1px solid var(--border); padding: 12px 18px 16px; display: flex; flex-direction: column; gap: 14px; }
+.modal-sub .side-card-head { margin-bottom: 8px; }
+.modal-sub .side-card-head h3 { font-size: 13.5px; }
 
 /* ===== 설정: 창/화면 (투명도·블러·배율) ===== */
 .field .hint { font-size: 11.5px; color: var(--text-mute); }
@@ -750,6 +759,24 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
 .rec-cal-btn { border: none; background: transparent; cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px; flex: 0 0 auto; opacity: .7; }
 .rec-cal-btn:hover { opacity: 1; }
 
+/* ===== 일정: 월간 달력(전체 보기) ===== */
+.cal-month { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 20px 16px; display: flex; flex-direction: column; }
+.cal-month-dow { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; font-size: 12px; color: var(--text-mute); padding: 6px 0 4px; }
+.cal-month-grid { flex: 1 1 auto; display: grid; grid-template-columns: repeat(7, 1fr); grid-auto-rows: minmax(82px, 1fr); gap: 4px; }
+.cal-cell { border: 1px solid var(--border); border-radius: 10px; padding: 4px 5px; overflow: hidden; display: flex; flex-direction: column; gap: 2px; cursor: pointer; background: var(--surface-2); }
+.cal-cell:hover { border-color: var(--primary); }
+.cal-cell.out { opacity: .45; }
+.cal-cell.today { box-shadow: inset 0 0 0 2px var(--primary); }
+.cal-cell-num { font-size: 12px; color: var(--text-dim); font-weight: 600; }
+.cal-cell.today .cal-cell-num { color: var(--primary); }
+.cal-chip { font-size: 11px; border-radius: 5px; padding: 1px 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.cal-more { font-size: 10.5px; color: var(--text-mute); padding-left: 2px; }
+
+/* 투두리스트 탭: 날짜 스테퍼 */
+.todo-date-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.todo-date-nav .todo-day-label { font-size: 14px; color: var(--text); min-width: 96px; text-align: center; }
+.todo-date-nav .count { font-size: 12px; color: var(--text-dim); }
+
 /* ===== 홈(대시보드) ===== */
 /* 섹션 헤더 (참고의 QUICK ACCESS › ) */
 .section-head { display: flex; align-items: center; gap: 8px; margin: 4px 2px 12px; }
@@ -820,13 +847,14 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
 .ledger-form input[type="text"] { flex: 1; min-width: 100px; }
 .deadline-form input[type="text"]#d-title { flex: 2; min-width: 140px; }
 .deadline-form input[type="text"]#d-notes { flex: 1; min-width: 120px; }
-.ledger-list, .deadline-list { display: flex; flex-direction: column; gap: 4px; }
+.ledger-list { display: flex; flex-direction: column; gap: 0; }
+.deadline-list { display: flex; flex-direction: column; gap: 6px; }
 .ledger-row {
-  display: grid; grid-template-columns: 26px 54px 100px 1fr auto 28px; align-items: center; gap: 10px;
-  background: var(--surface); border: 1px solid transparent; border-radius: 10px; padding: 9px 12px; font-size: 13.5px;
+  display: grid; grid-template-columns: auto 1fr auto 28px; align-items: center; gap: 10px;
+  background: transparent; border-bottom: 1px solid var(--grid-line); border-radius: 0; padding: 9px 8px; font-size: 13.5px;
   transition: background .1s;
 }
-.ledger-row:not(.ledger-head):hover { background: var(--surface-2); }
+.ledger-row:hover { background: var(--surface-2); border-radius: 8px; }
 .ledger-row .lr-ico .ic-svg { width: 18px; height: 18px; }
 /* 표 헤더 행 (참고 ALL FILES) */
 .ledger-head {
@@ -836,20 +864,45 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
 }
 .ledger-head:hover { background: transparent; }
 .lr-date { color: var(--text-dim); font-size: 12.5px; }
-.lr-cat { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lr-cat { justify-self: start; font-size: 11.5px; font-weight: 500; padding: 2px 9px; border-radius: 7px; white-space: nowrap; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
 .lr-memo { color: var(--text-dim); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lr-amt { text-align: right; font-weight: 700; }
+.lr-amt { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
 .ledger-row.income .lr-amt { color: var(--success); }
 .ledger-row.expense .lr-amt { color: var(--danger); }
+.lsum.balance.pos strong { color: var(--success); }
+.lsum.balance.neg strong { color: var(--danger); }
+/* 날짜별 그룹 헤더 (투명 모드에도 보이는 --grid-line 구분선) */
+.ledger-daygrp {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 11.5px; font-weight: 500; color: var(--text-dim);
+  padding: 11px 4px 4px; border-bottom: 1px solid var(--grid-line); margin-top: 2px;
+}
+.ledger-daygrp:first-child { margin-top: 0; }
+.ldg-net { font-variant-numeric: tabular-nums; font-weight: 600; }
+.ldg-net.pos { color: var(--success); }
+.ldg-net.neg { color: var(--danger); }
 
 /* ===== 작업 관리 (마감·커미션·외주 통합) ===== */
 .deadline-row {
   display: flex; align-items: center; gap: 12px;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px;
+  background: var(--surface); border: 1px solid var(--border); border-left: 3px solid transparent; border-radius: 10px; padding: 10px 14px 10px 12px;
 }
+/* 마감 임박을 행 왼쪽 색 띠로 (지남=빨강, 오늘=주황, 임박=파랑 — 배지 색과 일치) */
+.deadline-row.overdue { border-left-color: var(--danger); }
+.deadline-row.today { border-left-color: #d9730d; }
+.deadline-row.soon { border-left-color: var(--primary); }
 .dl-body { flex: 1; min-width: 0; }
+.dl-titlerow { display: flex; align-items: center; gap: 7px; }
+.dl-sdot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.dl-sdot.st-wait { background: var(--text-mute); }
+.dl-sdot.st-prog { background: var(--primary); }
+.dl-sdot.st-done { background: var(--success); }
 .dl-title { font-size: 14px; font-weight: 600; }
-.dl-sub { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+.dl-sub { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; font-size: 12px; color: var(--text-dim); }
+.dl-client { font-size: 12px; font-weight: 500; color: var(--text); }
+.dl-chip { font-size: 11px; padding: 1px 7px; border-radius: 6px; background: var(--surface-2); color: var(--text-dim); border: 1px solid var(--border-2); white-space: nowrap; }
+.dl-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: 0 0 auto; min-width: 80px; }
+.dl-amt { font-size: 13.5px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .deadline-row.done .dl-title { text-decoration: line-through; color: var(--text-dim); }
 .dl-badge { flex: 0 0 auto; font-size: 12px; font-weight: 700; border-radius: 999px; padding: 3px 11px; background: var(--surface-2); color: var(--text-dim); }
 .dl-badge.overdue { background: rgba(229,72,77,.14); color: var(--danger); }
@@ -914,7 +967,7 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
 
 /* ===== 마감 진행도 ===== */
 .dl-progress { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
-.dl-bar { flex: 1; height: 6px; background: var(--track); border-radius: 999px; overflow: hidden; }
+.dl-bar { flex: 1; height: 4px; background: var(--track); border-radius: 999px; overflow: hidden; }
 .dl-bar-fill { height: 100%; background: var(--accent); border-radius: 999px; transition: width .1s; }
 .dl-progress input[type="range"] { width: 96px; accent-color: var(--primary); flex: 0 0 auto; }
 .dl-pct { font-size: 11px; color: var(--text-dim); width: 36px; text-align: right; flex: 0 0 auto; }
