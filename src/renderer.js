@@ -2083,12 +2083,17 @@ function renderStickers() {
         const r2 = el.getBoundingClientRect();
         tools.classList.toggle('below', (r2.top - layerRect.top) < 40); // 위/아래로 끌 때 툴바 위치 실시간 전환
       };
-      const up = () => {
+      const up = (ev) => {
         el.classList.remove('dragging');
         el.removeEventListener('pointermove', move);
         el.removeEventListener('pointerup', up);
-        if (moved) { selectedStickerId = s.id; markStickerSelection(); scheduleSave(); } // 이동 후 선택 유지
-        else { selectedStickerId = (selectedStickerId === s.id ? null : s.id); markStickerSelection(); } // 클릭 → 선택 토글
+        if (moved) { selectedStickerId = s.id; markStickerSelection(); scheduleSave(); return; } // 이동(드래그) 후 선택 유지
+        // 클릭(안 움직임): 밑에 사이드바 탭/버튼이 있으면 그걸 우선 실행(탭 우선), 없으면 스티커 선택 토글
+        const navEl = document.elementsFromPoint(ev.clientX, ev.clientY)
+          .map((n) => (n.closest ? n.closest('[data-nav], #sidebar-collapse, .brand') : null))
+          .find(Boolean);
+        if (navEl) { selectedStickerId = null; markStickerSelection(); navEl.click(); } // 탭 우선
+        else { selectedStickerId = (selectedStickerId === s.id ? null : s.id); markStickerSelection(); } // 스티커 선택 토글
       };
       el.addEventListener('pointermove', move);
       el.addEventListener('pointerup', up);
