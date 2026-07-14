@@ -1945,9 +1945,7 @@ async function addSticker() {
   if (!(window.api.image && window.api.image.pick)) { toast('업데이트가 필요해요(스티커).'); return; }
   const r = await window.api.image.pick();
   if (!r || !r.ok) { if (r && r.error && r.error !== 'CANCELED') toast('이미지 오류: ' + r.error); return; }
-  const _layer = $('#sticker-layer');
-  const _lw = (_layer && _layer.clientWidth) || 800, _lh = (_layer && _layer.clientHeight) || 400;
-  const fx = Math.min(0.9, 100 / _lw), fy = Math.min(0.9, 100 / _lh); // 중심을 레이어 분수로(좌상단 근처)
+  const fx = 0.5, fy = 0.5; // 새 스티커는 레이어(창) 정중앙에 (렌더 시 translate(-50%,-50%) 중심 기준)
   stickers.push({ id: crypto.randomUUID(), view: currentView, src: r.dataUrl, fx, fy, w: 120, rot: 0, opacity: 100, locked: false });
   scheduleSave(); renderStickers();
   toast('스티커를 추가했어요. 드래그로 이동, 모서리로 크기/회전, 위 버튼으로 꾸며요.');
