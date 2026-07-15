@@ -524,10 +524,11 @@ function ytPlayJs(vol) {
       "var av=p?p.querySelector('video'):document.querySelector('video');" +
       "window.__setvol&&window.__setvol();" +
       "var adp=false; try{adp=!!(mp&&mp.getAdState&&mp.getAdState()===1);}catch(e){}" +
-      "if(adp||(p&&p.classList.contains('ad-showing'))){" +
+      "var adc=!!(p&&p.classList.contains('ad-showing'));" +
+      "if(adp||adc){" +
         "var s=document.querySelector('.ytp-ad-skip-button,.ytp-ad-skip-button-modern,.ytp-skip-ad-button,.ytp-ad-skip-button-slot button,.ytp-ad-skip-button-container button');" +
         "if(s){s.click();}" +
-        "if(av&&av.duration&&isFinite(av.duration)){av.currentTime=av.duration;}" +
+        "if(adp && av&&av.duration&&isFinite(av.duration)){av.currentTime=av.duration;}" + // 확정 광고(getAdState===1)에서만 빨리감기 — ad-showing 클래스만으론 본곡을 끝내지 않음
       "}" +
     "}catch(e){}},400);}" +
     "})();";
@@ -631,12 +632,13 @@ function startYtPoll() {
       const tooLoud = (typeof st.vol === 'number') && (st.vol > ytVolume + 0.03);
       if (st.ad) { ytMuteStreak = 0; ytUnmuteWait = 0; try { ytWindow.webContents.setAudioMuted(true); } catch (_) {} }
       else if (positived) {
-        if (tooLoud && ytUnmuteWait < 8) { ytUnmuteWait++; } // 초반 풀볼륨 구간은 음소거 유지(큰 소리 감춤)
+        if (tooLoud && ytUnmuteWait < 3) { ytUnmuteWait++; } // 초반 풀볼륨 구간은 음소거 유지(큰 소리 감춤). 상한 3틱(~0.75s)로 시작 무음 단축
         else { ytMuteStreak = 0; ytUnmuteWait = 0; try { ytWindow.webContents.setAudioMuted(false); } catch (_) {} }
       }
       else if (drift) { ytUnmuteWait = 0; ytMuteStreak++; if (ytMuteStreak >= 2) { try { ytWindow.webContents.setAudioMuted(true); } catch (_) {} } }
       else { ytUnmuteWait = 0; }
-      if (drift && !ytEndedSent) {
+      // 드리프트 종료·다음곡은 '비광고 + 연속 3틱(~0.75s)' 확인 시에만 — 광고 순간의 일시적 video_id 불일치로 곡이 끊겨 넘어가는 오탐 방지
+      if (drift && !st.ad && ytMuteStreak >= 3 && !ytEndedSent) {
         ytEndedSent = true;
         stopYtPoll();
         ytExec("var v=document.querySelector('video'); v&&v.pause();");
