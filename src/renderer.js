@@ -775,7 +775,12 @@ async function applyShell() {
     materialOk = !!(st && st.materialSupported);
     document.body.classList.toggle('is-max', !!(st && st.maximized));
   } catch (_) {}
-  // 진짜 배경 블러 = 미카뿐(아크릴은 깜빡임이라 제거). '미카'·'뿌연' 둘 다 네이티브 미카 사용.
+  // 아크릴 = 네이티브 아크릴. 실패하면 '뿌연'으로 자가치유(기존 미카 실패 패턴과 동일).
+  if (prefs.backgroundMaterial === 'acrylic') {
+    const ra = await window.api.win.setMaterial('acrylic').catch(() => null);
+    if (!ra || !ra.ok) prefs.backgroundMaterial = 'frost';
+  }
+  // 진짜 배경 블러 = 미카. '미카'·'뿌연' 둘 다 네이티브 미카 사용.
   if (prefs.backgroundMaterial === 'mica' || prefs.backgroundMaterial === 'frost') {
     const r = await window.api.win.setMaterial('mica').catch(() => null);
     // 미카 미지원(Win10 등): 순수 '미카'는 none으로 자가치유, '뿌연'은 CSS 질감으로 유지
@@ -2334,8 +2339,7 @@ async function importData() {
     // 가져온 설정 정규화 (범위 밖 값 방지)
     prefs.ytVolume = clampInt(prefs.ytVolume, 0, 100, 100);
     prefs.windowOpacity = clampInt(prefs.windowOpacity, 15, 100, 100);
-    if (prefs.backgroundMaterial === 'acrylic') prefs.backgroundMaterial = 'frost'; // 아크릴 제거 → 뿌연으로 전환
-    prefs.backgroundMaterial = ['none', 'frost', 'mica'].includes(prefs.backgroundMaterial) ? prefs.backgroundMaterial : 'none';
+    prefs.backgroundMaterial = ['none', 'frost', 'mica', 'acrylic'].includes(prefs.backgroundMaterial) ? prefs.backgroundMaterial : 'none';
     prefs.blurIntensity = clampInt(prefs.blurIntensity, 0, 100, 30);
     prefs.uiScale = clampInt(prefs.uiScale, 80, 150, 100);
     prefs.windowTransparent = (typeof prefs.windowTransparent === 'boolean') ? prefs.windowTransparent : false;
@@ -2482,7 +2486,8 @@ function bindUI() {
   if (wMat) wMat.querySelectorAll('.seg-btn').forEach((b) => b.addEventListener('click', async () => {
     if (!window.api.win) return;
     const m = b.dataset.m;
-    let nativeM = (m === 'mica' || m === 'frost') ? 'mica' : 'none'; // 뿌연도 진짜 흐림 위해 미카 사용
+    // 아크릴은 네이티브 아크릴 그대로, 뿌연은 진짜 흐림 위해 미카 사용
+    let nativeM = (m === 'acrylic') ? 'acrylic' : (m === 'mica' || m === 'frost') ? 'mica' : 'none';
     let r = await window.api.win.setMaterial(nativeM);
     if ((!r || !r.ok) && m === 'frost') { nativeM = 'none'; r = await window.api.win.setMaterial('none'); } // 미카 미지원(Win10) → 뿌연은 CSS 질감만
     if (!r || !r.ok) {
@@ -2763,8 +2768,8 @@ async function init() {
   prefs.sidebarCollapsed = (typeof p.sidebarCollapsed === 'boolean') ? p.sidebarCollapsed : (lsGet('sidebarCollapsed', '0') === '1');
   prefs.ytVolume = clampInt(p.ytVolume, 0, 100, 100);
   prefs.windowOpacity = clampInt(p.windowOpacity, 15, 100, 100);
-  const _bm = (p.backgroundMaterial === 'acrylic') ? 'frost' : p.backgroundMaterial; // 아크릴 제거 → 뿌연
-  prefs.backgroundMaterial = ['none', 'frost', 'mica'].includes(_bm) ? _bm : 'none';
+  const _bm = p.backgroundMaterial;
+  prefs.backgroundMaterial = ['none', 'frost', 'mica', 'acrylic'].includes(_bm) ? _bm : 'none';
   prefs.blurIntensity = clampInt(p.blurIntensity, 0, 100, 30);
   prefs.uiScale = clampInt(p.uiScale, 80, 150, 100);
   prefs.fontScale = clampInt(p.fontScale, 85, 130, 100);
@@ -2819,6 +2824,9 @@ async function init() {
   if (body) body.scrollTop = Math.max(minutesToTop(nowMins) - 120, 0);
 
   checkUpdateOnStart(); // 시작 시 업데이트 자동 확인(+자동 적용)
+
+  // 테마·아이콘·첫 렌더까지 끝남 → main에 알림(이제 창 표시). 구버전 preload면 생략 — 안전망 타임아웃이 표시함
+  try { window.api.win && window.api.win.themed && window.api.win.themed(); } catch (_) {}
 }
 
 // Electron 렌더러에서만 실행

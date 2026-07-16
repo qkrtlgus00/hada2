@@ -54,6 +54,7 @@ contextBridge.exposeInMainWorld('api', {
     setOpacity: (pct) => ipcRenderer.invoke('window:setOpacity', pct),
     setMaterial: (m) => ipcRenderer.invoke('window:setMaterial', m),
     setUiScale: (pct) => ipcRenderer.invoke('window:setUiScale', pct),
+    themed: () => ipcRenderer.send('ui:themed'),
   },
 
   /** 데이터 백업/복원 */

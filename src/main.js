@@ -116,6 +116,7 @@ ipcMain.handle('update:apply', async () => {
 });
 
 let mainWindow = null;
+let revealMainWindow = null; // 현재 창의 '테마 적용 후 첫 표시' 함수 — ipc 'ui:themed' 수신 시 호출
 let appBaseUrl = null; // 로컬 http 서버 주소
 
 // 앱 파일을 http://127.0.0.1 로 서빙 (유튜브 임베드가 file:// 출처를 거부하므로)
@@ -231,6 +232,7 @@ function createWindow(useFileFallback) {
     ...(winState.x != null ? { x: winState.x, y: winState.y } : {}),
     minWidth: 480,
     minHeight: 400,
+    show: false, // 렌더러가 저장된 테마를 적용(ui:themed)한 뒤에 표시 — 기본 파랑 → 커스텀 색 깜빡임 제거
     title: '하다 — 할 일 & 메모',
     // 진짜 투명창: 프레임 제거 + 투명 처리 → 투명도 낮추면 바탕화면이 실제로 비침.
     // (앱이 직접 그린 #titlebar로 이동·최소/최대/닫기, 리사이즈는 프레임리스 기본 동작)
@@ -258,10 +260,27 @@ function createWindow(useFileFallback) {
   mainWindow.on('maximize', sendMax);
   mainWindow.on('unmaximize', sendMax);
 
-  // 창 크기/위치 저장(리사이즈·이동 디바운스) + 저장된 최대화 상태 복원
+  // 창 크기/위치 저장(리사이즈·이동 디바운스)
   mainWindow.on('resize', saveWindowStateDebounced);
   mainWindow.on('move', saveWindowStateDebounced);
-  if (winState.maximized) mainWindow.maximize();
+
+  // ---- 첫 표시(reveal): 렌더러가 테마 적용을 마치면(ui:themed) 그때 창을 보여줌 ----
+  // 저장된 최대화 복원도 여기서 — maximize()는 숨은 창을 강제로 표시하므로(Electron 문서),
+  // show:false 상태에서 미리 부르면 테마 적용 전 기본 파랑이 그대로 보인다.
+  // ready-to-show는 '테마 적용 전 첫 페인트'에 오므로 표시 신호로 쓰지 않는다(깜빡임 재발).
+  let revealed = false;
+  let revealTimer = null;
+  const reveal = () => {
+    if (revealed) return;
+    revealed = true;
+    if (revealTimer) { clearTimeout(revealTimer); revealTimer = null; }
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (winState.maximized) mainWindow.maximize();
+    mainWindow.show();
+  };
+  revealMainWindow = reveal;
+  revealTimer = setTimeout(reveal, 1500); // 안전망: 신호 유실(구버전 렌더러/init 예외)에도 창은 반드시 뜬다
+  mainWindow.webContents.on('did-fail-load', reveal); // 로드 실패 화면도 보여야 함
 
   // 메뉴바 제거로 사라진 기본 단축키 복구 (DevTools / 새로고침)
   mainWindow.webContents.on('before-input-event', (e, input) => {
@@ -283,6 +302,7 @@ function createWindow(useFileFallback) {
   });
 
   mainWindow.on('closed', () => {
+    if (revealTimer) clearTimeout(revealTimer);
     mainWindow = null;
     // 숨은 음악 재생 창이 남아 앱이 안 꺼지는 것 방지
     if (ytWindow && !ytWindow.isDestroyed()) ytWindow.close();
@@ -473,6 +493,8 @@ ipcMain.handle('window:setUiScale', (_e, pct) => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.setZoomFactor(v / 100);
   return { ok: true, value: v };
 });
+// 렌더러가 저장된 테마·글씨·아이콘까지 적용을 마친 뒤 보내는 신호 → 이때 창을 처음 표시 (시작 깜빡임 제거)
+ipcMain.on('ui:themed', () => { if (revealMainWindow) revealMainWindow(); });
 
 // ---- 외부 브라우저로 URL 열기 (유튜브 등) ----
 ipcMain.handle('open:external', async (_e, url) => {
@@ -487,6 +509,8 @@ let ytWindow = null;
 let ytVolume = 1;        // 0..1 — 현재 음량 (렌더러 prefs.ytVolume/100). 새 곡 로드 시에도 적용
 let ytExpectedId = '';   // youtube:play로 요청한 영상 ID — 다른 영상으로 이탈(드리프트) 감지용
 let ytEndedSent = false; // youtube:ended 중복 전송 방지 (폴링/내비게이션 가드 동시 발화 대비)
+let ytNavPending = false; // youtube:play의 loadURL 커밋 전(이전 문서 잔존) — 폴링의 ended/드리프트 판정 유예
+let ytNavGen = 0;         // loadURL 세대 — 연타로 이전 load가 abort돼도 새 게이트를 풀지 않게
 
 // 광고 요청 차단 (전용 세션 'ytmusic'에만 적용 — 메인앱과 격리) — best-effort
 // 주의: 본편과 같은 googlevideo.com 으로 서빙되는 서버삽입 광고는 네트워크 차단이 불가능
@@ -509,8 +533,14 @@ function setupYtSession() {
 }
 // ---- 광고 데이터 제거 (문서 시작 시점, 페이지 메인 월드) — best-effort ----
 // 유튜브가 광고를 그리기 '전에' 플레이어 응답에서 광고 필드만 삭제 → 광고가 아예 시작되지 않음.
-// 어느 훅이든 실패하면 조용히 무시 → 기존 음소거+스킵+빨리감기(ytPlayJs/폴링)가 그대로 최종 방어선.
-const YT_AD_STRIP = true; // 문제 생기면 false로 — 즉시 기존(음소거+스킵) 동작으로 복귀
+// 실패하면 조용히 무시 → 기존 음소거+스킵+빨리감기(ytPlayJs/폴링)가 그대로 최종 방어선.
+// 이력: 1.15.0은 훅 3종(ytInitialPlayerResponse 트랩 + 전역 JSON.parse + Response.prototype.json).
+//   '재생 안 됨' 보고 → 실제론 재생됐고 시작이 느렸던 것(전체 로드 대기 + 폴링 음소거 구멍, 1.15.2에서 수정).
+// 1.15.2: 트랩 1종만 유지. 곡마다 loadURL(새 문서 전체 로드)이라 광고는 항상 초기 HTML의
+//   ytInitialPlayerResponse에 실려 옴 → 트랩만으로 충분. 전역 JSON.parse 래핑은 페이지의 모든
+//   파싱을 느리게 하고 변조 흔적(toString≠[native code])이 가장 컸음.
+// 문제 생기면 false로 — 즉시 기존(음소거+스킵) 동작으로 복귀 (킬 스위치 유지).
+const YT_AD_STRIP = true;
 const YT_ADSTRIP_JS = "(function(){" +
   "if(window.__adStrip)return;window.__adStrip=true;" +
   "var K=['adPlacements','adSlots','playerAds','adBreakHeartbeatParams'];" +
@@ -518,8 +548,6 @@ const YT_ADSTRIP_JS = "(function(){" +
     "if(o.playerResponse)strip(o.playerResponse);}}catch(e){}return o;}" +
   "try{var _p;Object.defineProperty(window,'ytInitialPlayerResponse',{configurable:true," +
     "get:function(){return _p;},set:function(v){_p=strip(v);}});}catch(e){}" +
-  "try{var oj=Response.prototype.json;Response.prototype.json=function(){return oj.apply(this,arguments).then(strip);};}catch(e){}" +
-  "try{var op=JSON.parse;JSON.parse=function(){return strip(op.apply(JSON,arguments));};}catch(e){}" +
   "})();";
 // 프리로드 파일을 userData에 런타임 생성 — UP_FILES(자체 업데이트 파일 목록)에 새 파일을 추가하면
 // 구버전 업데이터가 못 받는 닭-달걀 문제가 있어, main.js가 직접 써서 배포/업데이트 경로와 무관하게 동작.
@@ -544,9 +572,13 @@ function ytPlayJs(vol) {
     "window.__ytvol=" + vol + ";" +
     // 볼륨 설정 헬퍼: 플레이어 API(mp.setVolume)로 '플레이어 자체 볼륨'을 사용자값으로 → 로드 시 유튜브가 100으로 덮는 것 방지. video.volume도 폴백.
     "window.__setvol=function(){try{var mp=document.querySelector('#movie_player');if(mp&&mp.setVolume){mp.setVolume(Math.round((window.__ytvol||0)*100));if((window.__ytvol||0)>0&&mp.isMuted&&mp.isMuted()&&mp.unMute){mp.unMute();}}var vs=document.querySelectorAll('video');for(var i=0;i<vs.length;i++){vs[i].volume=window.__ytvol;}}catch(e){}};" +
-    "var v=document.querySelector('video');" +
-    "if(v){v.volume=window.__ytvol; v.play&&v.play(); v.addEventListener('ended',function(){try{v.pause();}catch(e){}});}" +
-    "window.__setvol();" +
+    // <video>가 아직 없으면(dom-ready 직후 등) 100ms 간격으로 최대 5초 기다렸다가 생기는 즉시 재생 시작.
+    "function boot(){var v=document.querySelector('video');if(!v)return false;" +
+      "v.volume=window.__ytvol; v.play&&v.play(); v.addEventListener('ended',function(){try{v.pause();}catch(e){}});" +
+      "window.__setvol();return true;}" +
+    "if(!boot()&&!window.__ytboot){var n=0;window.__ytboot=setInterval(function(){try{n++;" +
+      "if(boot()||n>50){clearInterval(window.__ytboot);window.__ytboot=0;}" +
+    "}catch(e){clearInterval(window.__ytboot);window.__ytboot=0;}},100);}" +
     "try{var b=document.querySelector('.ytp-autonav-toggle-button[aria-checked=\"true\"]'); if(b){b.click();}}catch(e){}" +
     "if(!window.__adskip){window.__adskip=setInterval(function(){try{" +
       "var mp=document.querySelector('#movie_player');" +
@@ -608,10 +640,16 @@ ipcMain.handle('youtube:play', async (_e, url) => {
           if (!on && YT_AD_STRIP) console.warn('[yt] ad-strip inactive — falling back to mute+skip only');
         }).catch(() => {});
       });
+      // dom-ready(HTML 파싱 완료)에도 주입 — 전체 로드보다 0.5~2s 이름. ytPlayJs는 재실행 안전
+      // (__adskip/__ytboot 가드, play()/볼륨 멱등) → 둘 다 걸어 이른 쪽이 먼저 재생을 시작.
+      ytWindow.webContents.on('dom-ready', () => {
+        ytWindow.webContents.executeJavaScript(ytPlayJs(ytVolume)).catch(() => {});
+      });
       // 내비게이션 가드: 요청한 영상이 아닌 다른 watch 페이지로 이동(autonav/추천 등)하면
       // 즉시 정지하고 '곡 종료'로 처리 → 렌더러의 반복/다음곡 로직이 올바른 곡으로 이어감.
       // (재로드 대신 ended 처리 — 리다이렉트 루프 방지. watch 아닌 페이지는 무시해 연쇄 스킵 방지)
       const onNav = (_ev, navUrl) => {
+        ytNavPending = false; // 어떤 내비게이션이든 커밋 → 이전 문서 사라짐, 판정 재개
         const s = String(navUrl || '');
         if (!/^https:\/\/(www\.)?youtube\.com\/watch/.test(s)) return;
         const mm = s.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
@@ -629,59 +667,81 @@ ipcMain.handle('youtube:play', async (_e, url) => {
     // 로드 즉시 전체 음소거 → 프리롤/미드롤 광고·엉뚱한 곡 소리 원천 차단.
     // 폴링이 "지정 영상이 광고 없이 재생 중"임을 확인하면 해제.
     try { ytWindow.webContents.setAudioMuted(true); } catch (_) {}
-    await ytWindow.loadURL(url); // show() 하지 않음 → 백그라운드 오디오
-    try { ytWindow.webContents.setAudioMuted(true); } catch (_) {}
-    startYtPoll(); // 상태 폴링 시작 (음소거 제어 + 드리프트/종료 감지)
+    // 전체 로드를 await 하지 않음 — 추천/댓글/썸네일까지 1~3s인데 플레이어는 그 전에 뜬다.
+    // 렌더러는 play()의 반환값을 쓰지 않으므로(fire-and-forget) 실패는 로그만.
+    ytNavGen++;
+    const gen = ytNavGen;
+    ytNavPending = true;
+    ytWindow.loadURL(url).catch((e) => {
+      if (gen === ytNavGen) ytNavPending = false; // 실패 → 게이트 해제(기존 드리프트 로직이 곡 진행을 복구)
+      console.warn('[yt] loadURL failed:', String((e && e.message) || e));
+    });
+    startYtPoll(); // 즉시 시작 (음소거 제어 + 드리프트/종료 감지) — 준비되는 순간 소리가 난다
     return { ok: true };
   } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
 });
-// 250ms 폴링: 플레이어 API로 광고/현재 영상ID/종료를 확인해
+// 250ms 폴링(첫 틱은 즉시): 플레이어 API로 광고/현재 영상ID/종료를 확인해
 //  ① 광고이거나 지정 영상이 아니면 음소거, 지정 영상이 광고 없이 재생될 때만 소리
 //  ② 오토플레이가 다른 곡을 틀면(드리프트) 즉시 정지+다음 지정곡
-//  ③ 곡 종료 시 정지+다음곡
+//  ③ 곡 종료 시 정지+다음곡   (②③은 자체 loadURL 진행 중엔 유예 — 이전 문서 잔상 오탐 방지)
 let ytPoll = null;
-let ytMuteStreak = 0; // 음소거 게이트 히스테리시스: 광고/다른곡이 연속 확인될 때만 음소거(순간 오탐 무시)
-let ytUnmuteWait = 0; // 초반 풀볼륨 구간 음소거 유지 카운터(볼륨 확정 전 해제 방지, 8틱 안전상 해제)
-function stopYtPoll() { if (ytPoll) { clearInterval(ytPoll); ytPoll = null; } ytMuteStreak = 0; ytUnmuteWait = 0; }
+let ytMuteStreak = 0;  // 음소거 게이트 히스테리시스: 광고/다른곡이 연속 확인될 때만 음소거(순간 오탐 무시)
+let ytUnmuteWait = 0;  // 초반 풀볼륨 구간 음소거 유지 카운터(volume이 사용자값으로 내려올 때까지, 상한 3틱)
+let ytNoVidStreak = 0; // video_id 미확정(플레이어 초기화 중) 연속 틱 수 — 조건 충족 2틱이면 조기 해제
+function stopYtPoll() { if (ytPoll) { clearInterval(ytPoll); ytPoll = null; } ytMuteStreak = 0; ytUnmuteWait = 0; ytNoVidStreak = 0; }
 function startYtPoll() {
   stopYtPoll();
-  ytPoll = setInterval(async () => {
+  const tick = async () => {
     if (!ytWindow || ytWindow.isDestroyed()) { stopYtPoll(); return; }
     try {
       const st = await ytWindow.webContents.executeJavaScript(
         "(function(){" +
         "var mp=document.querySelector('#movie_player');" +
         "var v=document.querySelector('video');" +
-        "var ad=false,vid='';" +
+        "var ad=false,vid='',lv='';" +
         "try{ad=!!(mp&&mp.getAdState&&mp.getAdState()===1);}catch(e){}" +
         "try{vid=(mp&&mp.getVideoData&&mp.getVideoData().video_id)||'';}catch(e){}" +
+        "try{lv=(location.search.match(/[?&]v=([a-zA-Z0-9_-]{11})/)||[])[1]||'';}catch(e){}" +
         "if(!ad){var p=document.querySelector('.html5-video-player');ad=!!(p&&p.classList.contains('ad-showing'));}" +
-        "try{if(window.__setvol){window.__setvol();}else{var vv=document.querySelectorAll('video');for(var i=0;i<vv.length;i++)vv[i].volume=window.__ytvol;}}catch(e){}" + // 볼륨 상시(플레이어 API + video)
-        "return {ended:v?v.ended:false,d:v?v.duration:0,ad:ad,vid:vid,vol:(v?v.volume:window.__ytvol)};" +
+        "try{if(window.__setvol){window.__setvol();}else{var vv=document.querySelectorAll('video');for(var i=0;i<vv.length;i++)vv[i].volume=window.__ytvol;}}catch(e){}" +
+        "return {ended:v?v.ended:false,d:v?v.duration:0,ad:ad,vid:vid,lv:lv," +
+        "playing:!!(v&&!v.paused&&!v.ended&&v.currentTime>0.1),vol:(v?v.volume:window.__ytvol)};" +
         "})();"
       );
       if (!st) return;
       const drift = !!(ytExpectedId && st.vid && st.vid !== ytExpectedId);
-      // 음소거 게이트: 광고는 즉시 음소거. 지정 영상이라도 초반 볼륨이 사용자값보다 크면(유튜브가 100으로 덮는 구간)
-      // 음소거를 유지해 큰 소리를 감춘 뒤, 볼륨이 사용자값으로 내려오면 소리 냄. (8틱≈2s 지나면 안전상 해제)
       const positived = ytExpectedId ? (st.vid === ytExpectedId && !st.ad) : (!!st.vid && !st.ad);
       const tooLoud = (typeof st.vol === 'number') && (st.vol > ytVolume + 0.03);
-      if (st.ad) { ytMuteStreak = 0; ytUnmuteWait = 0; try { ytWindow.webContents.setAudioMuted(true); } catch (_) {} }
+      if (st.ad) { ytMuteStreak = 0; ytUnmuteWait = 0; ytNoVidStreak = 0; try { ytWindow.webContents.setAudioMuted(true); } catch (_) {} }
       else if (positived) {
-        if (tooLoud && ytUnmuteWait < 3) { ytUnmuteWait++; } // 초반 풀볼륨 구간은 음소거 유지(큰 소리 감춤). 상한 3틱(~0.75s)로 시작 무음 단축
+        ytNoVidStreak = 0;
+        if (tooLoud && ytUnmuteWait < 3) { ytUnmuteWait++; } // 초반 풀볼륨 구간은 음소거 유지(큰 소리 감춤), 상한 3틱
         else { ytMuteStreak = 0; ytUnmuteWait = 0; try { ytWindow.webContents.setAudioMuted(false); } catch (_) {} }
       }
-      else if (drift) { ytUnmuteWait = 0; ytMuteStreak++; if (ytMuteStreak >= 2) { try { ytWindow.webContents.setAudioMuted(true); } catch (_) {} } }
-      else { ytUnmuteWait = 0; }
-      // 드리프트 종료·다음곡은 '비광고 + 연속 3틱(~0.75s)' 확인 시에만 — 광고 순간의 일시적 video_id 불일치로 곡이 끊겨 넘어가는 오탐 방지
-      if (drift && !st.ad && ytMuteStreak >= 3 && !ytEndedSent) {
+      else if (drift) { ytUnmuteWait = 0; ytNoVidStreak = 0; ytMuteStreak++; if (ytMuteStreak >= 2) { try { ytWindow.webContents.setAudioMuted(true); } catch (_) {} } }
+      else {
+        // video_id 미확정(플레이어 초기화 중). 조기 해제: 요청 watch URL(lv 일치) + 실제 재생 중
+        // + 광고 신호 없음 + loadURL 커밋 후(!ytNavPending — 같은 곡 연타 시 이전 문서 잔상 소리 방지)
+        // 가 연속 2틱(~0.5s). 광고 신호(getAdState/ad-showing)가 늦는 오탐은 1틱 이내라 2틱이면 흡수.
+        // 초반 풀볼륨(tooLoud)은 streak과 동시에 계수 — 직렬로 쌓여 4+3틱(~1.75s)이 되던 버그 수정.
+        // ytMuteStreak은 건드리지 않음(드리프트 판정 유지).
+        const rightPage = ytExpectedId ? (st.lv === ytExpectedId) : true;
+        if (!st.vid && st.playing && rightPage && !ytNavPending) {
+          ytNoVidStreak++;
+          if (tooLoud && ytUnmuteWait < 3) { ytUnmuteWait++; }
+          else if (ytNoVidStreak >= 2) { ytUnmuteWait = 0; try { ytWindow.webContents.setAudioMuted(false); } catch (_) {} }
+        } else { ytNoVidStreak = 0; ytUnmuteWait = 0; }
+      }
+      // 드리프트 종료·다음곡은 '비광고 + 연속 3틱' 확인 시에만 — 광고 순간의 일시적 video_id 불일치 오탐 방지.
+      // ytNavPending(자체 loadURL 커밋 전)엔 이전 문서를 보고 있으므로 판정하지 않음.
+      if (drift && !st.ad && ytMuteStreak >= 3 && !ytEndedSent && !ytNavPending) {
         ytEndedSent = true;
         stopYtPoll();
         ytExec("var v=document.querySelector('video'); v&&v.pause();");
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('youtube:ended');
         return;
       }
-      if (st.ended && !st.ad && st.d > 0) {
+      if (st.ended && !st.ad && st.d > 0 && !ytNavPending) {
         stopYtPoll();
         ytExec("var v=document.querySelector('video'); v&&v.pause();");
         if (!ytEndedSent) {
@@ -690,7 +750,9 @@ function startYtPoll() {
         }
       }
     } catch (_) { /* 페이지 전환 중 등은 무시 */ }
-  }, 250);
+  };
+  ytPoll = setInterval(tick, 250); // 인터벌을 먼저 등록 — 즉시 틱이 stopYtPoll을 불러도 정상 정리됨
+  tick(); // 첫 틱 즉시 (기존엔 250ms 대기)
 }
 function ytExec(js) {
   if (ytWindow && !ytWindow.isDestroyed()) {
