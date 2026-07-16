@@ -682,6 +682,8 @@ ipcMain.handle('youtube:play', async (_e, url) => {
 });
 // 250ms 폴링(첫 틱은 즉시): 플레이어 API로 광고/현재 영상ID/종료를 확인해
 //  ① 광고이거나 지정 영상이 아니면 음소거, 지정 영상이 광고 없이 재생될 때만 소리
+//     (예외: ad-showing 클래스만 있고(adc) 확정 광고(adp=getAdState===1)가 아니면서 본곡이
+//      확인되면(요청 ID 일치+재생 중) 오버레이/배너 광고 → 음소거하지 않음. 불확실하면 음소거.)
 //  ② 오토플레이가 다른 곡을 틀면(드리프트) 즉시 정지+다음 지정곡
 //  ③ 곡 종료 시 정지+다음곡   (②③은 자체 loadURL 진행 중엔 유예 — 이전 문서 잔상 오탐 방지)
 let ytPoll = null;
@@ -698,21 +700,27 @@ function startYtPoll() {
         "(function(){" +
         "var mp=document.querySelector('#movie_player');" +
         "var v=document.querySelector('video');" +
-        "var ad=false,vid='',lv='';" +
-        "try{ad=!!(mp&&mp.getAdState&&mp.getAdState()===1);}catch(e){}" +
+        "var adp=false,adc=false,vid='',lv='';" +
+        "try{adp=!!(mp&&mp.getAdState&&mp.getAdState()===1);}catch(e){}" +
         "try{vid=(mp&&mp.getVideoData&&mp.getVideoData().video_id)||'';}catch(e){}" +
         "try{lv=(location.search.match(/[?&]v=([a-zA-Z0-9_-]{11})/)||[])[1]||'';}catch(e){}" +
-        "if(!ad){var p=document.querySelector('.html5-video-player');ad=!!(p&&p.classList.contains('ad-showing'));}" +
+        "var p=document.querySelector('.html5-video-player');adc=!!(p&&p.classList.contains('ad-showing'));" +
         "try{if(window.__setvol){window.__setvol();}else{var vv=document.querySelectorAll('video');for(var i=0;i<vv.length;i++)vv[i].volume=window.__ytvol;}}catch(e){}" +
-        "return {ended:v?v.ended:false,d:v?v.duration:0,ad:ad,vid:vid,lv:lv," +
+        "return {ended:v?v.ended:false,d:v?v.duration:0,adp:adp,adc:adc,vid:vid,lv:lv," +
         "playing:!!(v&&!v.paused&&!v.ended&&v.currentTime>0.1),vol:(v?v.volume:window.__ytvol)};" +
         "})();"
       );
       if (!st) return;
       const drift = !!(ytExpectedId && st.vid && st.vid !== ytExpectedId);
-      const positived = ytExpectedId ? (st.vid === ytExpectedId && !st.ad) : (!!st.vid && !st.ad);
+      // v1.15.4 광고 판별 분리: adp=확정 광고(getAdState===1 — 광고가 '현재 미디어'로 재생 중),
+      // adc=ad-showing 클래스만(오버레이/배너 광고는 본곡이 재생 중에도 붙음 → 음소거하면 곡 중간 무음).
+      // 본곡 확인(요청 ID 일치 + 재생 중 + 확정광고 아님) 시에만 adc를 무시. 불확실하면 항상 음소거.
+      const vidOk = !!(ytExpectedId && st.vid === ytExpectedId);
+      const overlayOnly = !!(st.adc && !st.adp && vidOk && st.playing);
+      const adBlock = !!(st.adp || (st.adc && !overlayOnly));
+      const positived = ytExpectedId ? (st.vid === ytExpectedId && !adBlock) : (!!st.vid && !adBlock);
       const tooLoud = (typeof st.vol === 'number') && (st.vol > ytVolume + 0.03);
-      if (st.ad) { ytMuteStreak = 0; ytUnmuteWait = 0; ytNoVidStreak = 0; try { ytWindow.webContents.setAudioMuted(true); } catch (_) {} }
+      if (adBlock) { ytMuteStreak = 0; ytUnmuteWait = 0; ytNoVidStreak = 0; try { ytWindow.webContents.setAudioMuted(true); } catch (_) {} }
       else if (positived) {
         ytNoVidStreak = 0;
         if (tooLoud && ytUnmuteWait < 3) { ytUnmuteWait++; } // 초반 풀볼륨 구간은 음소거 유지(큰 소리 감춤), 상한 3틱
@@ -734,14 +742,17 @@ function startYtPoll() {
       }
       // 드리프트 종료·다음곡은 '비광고 + 연속 3틱' 확인 시에만 — 광고 순간의 일시적 video_id 불일치 오탐 방지.
       // ytNavPending(자체 loadURL 커밋 전)엔 이전 문서를 보고 있으므로 판정하지 않음.
-      if (drift && !st.ad && ytMuteStreak >= 3 && !ytEndedSent && !ytNavPending) {
+      if (drift && !adBlock && ytMuteStreak >= 3 && !ytEndedSent && !ytNavPending) {
         ytEndedSent = true;
         stopYtPoll();
         ytExec("var v=document.querySelector('video'); v&&v.pause();");
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('youtube:ended');
         return;
       }
-      if (st.ended && !st.ad && st.d > 0 && !ytNavPending) {
+      // ended 판정: adBlock을 쓰면 안 됨 — ended면 playing=false → overlayOnly=false → adBlock=adc가 되어
+      // 오버레이가 붙은 채 곡이 끝나면 다음곡 신호가 영영 안 나가 큐가 멈춘다. 확정 광고(adp)만 제외하고,
+      // adc는 본곡 확인(vidOk) 시 무시.
+      if (st.ended && !st.adp && (!st.adc || vidOk) && st.d > 0 && !ytNavPending) {
         stopYtPoll();
         ytExec("var v=document.querySelector('video'); v&&v.pause();");
         if (!ytEndedSent) {
