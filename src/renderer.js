@@ -40,13 +40,14 @@ let stickers = [];    // [{id,view,src,x,y,w}]
 let ytCurrent = null; // 현재 재생 중 트랙 id
 let ytPlaying = false; // 백그라운드 오디오 재생 상태
 let ledgerType = 'expense'; // 가계부 입력 구분
+let ledgerStatsType = 'expense'; // 통계(이 달 분석) 구분 토글 — 세션 유지, 저장 안 함
 let currentView = 'calendar';
 let deadlineMonth = ''; // 작업 월 필터 ('' = 전체)
 // UI 설정(테마/색/제목/사이드바접힘/음량/창 셸/알림) — data.json에 저장(origin 무관 영구)
 let prefs = {
   theme: 'light', colors: {}, viewColors: {}, appTitle: '하다', sidebarCollapsed: false,
   ytRepeat: 'off', ytVolume: 100,
-  windowOpacity: 100, backgroundMaterial: 'none', blurIntensity: 30, uiScale: 100,
+  windowOpacity: 100, backgroundMaterial: 'none', blurIntensity: 30, uiScale: 100, fontScale: 100,
   windowTransparent: false, // 기본 불투명(솔리드). 켜면 바탕화면 비침
   notifyDeadlines: true,
   deadlineNotifyTime: '09:00', // 마감 알림 시각(HH:MM) — 전날·당일 이 시각에
@@ -302,11 +303,12 @@ function sumLedger(items, ym) {
   }
   return { income, expense, balance: income - expense };
 }
-// 그달 지출을 카테고리별로 합산 (내림차순). 빈 카테고리는 '기타'
-function sumByCategory(items, ym) {
+// 그달 내역을 구분(type: 기본 'expense')별·카테고리별로 합산 (내림차순). 빈 카테고리는 '기타'
+function sumByCategory(items, ym, type) {
+  const want = (type === 'income') ? 'income' : 'expense'; // 인자 없으면 지출 — 기존 호출 호환
   const map = new Map();
   for (const it of items || []) {
-    if (it.type !== 'expense') continue;
+    if (it.type !== want) continue;
     if (ym && monthKey(it.date) !== ym) continue;
     const cat = (it.category && it.category.trim()) || '기타';
     map.set(cat, (map.get(cat) || 0) + (Number(it.amount) || 0));
@@ -760,6 +762,11 @@ function applyGlassCss() {
   r.setProperty('--surface-opaque', surface + '%');
   r.setProperty('--glass-blur', Math.round(extra * 0.28) + 'px'); // 0~100 → 0~28px 실제 backdrop 블러
 }
+// 글씨 크기(%) — 레이아웃은 그대로, 폰트만 배율 (styles.css의 font-size가 전부 calc(Npx * var(--fs)))
+function applyFontScale() {
+  const v = clampInt(prefs.fontScale, 85, 130, 100);
+  document.documentElement.style.setProperty('--fs', String(v / 100));
+}
 // 저장된 셸 설정을 네이티브 창에 재적용 (시작 시 main이 적용한 값과 동기화 + 미지원 OS 자가치유)
 async function applyShell() {
   if (!(window.api && window.api.win)) return;
@@ -790,6 +797,9 @@ function syncShellControls() {
   const sc = $('#w-scale'), sv = $('#w-scale-val');
   if (sc) sc.value = String(prefs.uiScale);
   if (sv) sv.textContent = prefs.uiScale + '%';
+  const fsc = $('#w-fontscale'), fsv = $('#w-fontscale-val');
+  if (fsc) fsc.value = String(prefs.fontScale);
+  if (fsv) fsv.textContent = prefs.fontScale + '%';
   const seg = $('#w-material');
   if (seg) seg.querySelectorAll('.seg-btn').forEach((b) => {
     b.classList.toggle('on', b.dataset.m === prefs.backgroundMaterial);
@@ -1163,6 +1173,7 @@ function cssVar(name) {
 }
 function applyColors(c) {
   const root = document.documentElement.style;
+  const grad = !c || c.gradient !== false; // 그라데이션 기본 ON (기존 데이터엔 키 없음)
   if (c && c.accent) {
     root.setProperty('--accent', c.accent);
     root.setProperty('--primary', c.accent);
@@ -1172,17 +1183,23 @@ function applyColors(c) {
     const t = idealText(c.sidebar);
     const { r, g, b } = hexToRgb(t);
     root.setProperty('--sidebar-bg', c.sidebar);
-    root.setProperty('--sidebar-bg-2', mix(c.sidebar, '#000000', 0.10)); // 아랫부분 고정색 제거 → 사이드바 전체 선택색
     root.setProperty('--sidebar-text', t);
     root.setProperty('--sidebar-text-dim', `rgba(${r},${g},${b},0.62)`);
     root.setProperty('--sidebar-active-bg', `rgba(${r},${g},${b},0.14)`);
   }
-  if (c && c.pageBg) {
-    root.setProperty('--page-bg', c.pageBg);
+  // 사이드바 끝색: 사용자 지정 > 시작색에서 파생(기존 동작). 그라데이션 끄면 시작색(단색).
+  if (c && (c.sidebar || c.sidebar2 || c.gradient === false)) {
+    const start = c.sidebar || '#2f66dc'; // :root --sidebar-bg 기본값과 동일해야 함
+    root.setProperty('--sidebar-bg-2', !grad ? start : (c.sidebar2 || mix(start, '#000000', 0.10)));
+  }
+  if (c && c.pageBg) root.setProperty('--page-bg', c.pageBg);
+  // 페이지 끝색: 지정 > 시작색에서 파생 — 기존엔 기본 파랑(#295ccb)에 머무는 버그가 있었음(수정)
+  if (c && (c.pageBg || c.pageBg2 || c.gradient === false)) {
+    const start = c.pageBg || '#2f66dc'; // :root --page-bg 기본값과 동일해야 함
+    root.setProperty('--page-bg-2', !grad ? start : (c.pageBg2 || mix(start, '#000000', 0.08)));
   }
   if (c && c.panel) {
     root.setProperty('--panel', c.panel);
-    // 보조 패널색은 패널과 페이지 배경의 중간 톤으로 파생
     root.setProperty('--panel-2', mix(c.panel, c.pageBg || cssVar('--page-bg') || c.panel, 0.5));
   }
   if (c && c.text) {
@@ -1196,7 +1213,7 @@ function saveColors() { prefs.colors = colors; try { localStorage.setItem('color
 function resetColors() {
   colors = {};
   ['--accent', '--primary', '--accent-text', '--sidebar-bg', '--sidebar-bg-2', '--sidebar-text', '--sidebar-text-dim',
-    '--sidebar-active-bg', '--page-bg', '--panel', '--panel-2', '--text', '--text-dim', '--text-mute']
+    '--sidebar-active-bg', '--page-bg', '--page-bg-2', '--panel', '--panel-2', '--text', '--text-dim', '--text-mute']
     .forEach((v) => document.documentElement.style.removeProperty(v));
   prefs.viewColors = {};
   document.documentElement.style.removeProperty('--view-accent'); // CSS 기본값(var(--primary))으로 — 탭 색 통합
@@ -1234,6 +1251,7 @@ function renderPresets() {
     b.addEventListener('click', () => {
       // 강조·사이드바만 프리셋 적용, 페이지/패널/글자 사용자값은 보존
       colors = { ...colors, accent: p.accent, sidebar: p.sidebar };
+      delete colors.sidebar2; // 프리셋의 새 시작색과 안 맞는 옛 끝색 제거 → 파생 그라데이션으로
       applyColors(colors); saveColors();
       $('#c-accent').value = p.accent;
       $('#c-sidebar').value = p.sidebar;
@@ -1245,16 +1263,19 @@ function openSettingsModal() {
   $('#c-title').value = loadTitle();
   $('#c-accent').value = colors.accent || cssVar('--accent') || '#14161f';
   $('#c-sidebar').value = colors.sidebar || cssVar('--sidebar-bg') || '#f3f4f8';
-  const setColorInput = (sel, key, fallback) => {
+  const setColorInput = (sel, key, varName, dflt) => {
     const el = $(sel); if (!el) return;
-    let v = colors[key] || cssVar(fallback) || '';
+    let v = colors[key] || cssVar(varName) || '';
     // rgba()/파생값이면 색 입력에 못 넣으므로 기본 hex로
-    if (!/^#[0-9a-fA-F]{6}$/.test(v)) v = fallback === '--page-bg' ? '#e8e9ee' : fallback === '--panel' ? '#ffffff' : '#1d2030';
+    if (!/^#[0-9a-fA-F]{6}$/.test(v)) v = dflt;
     el.value = v;
   };
-  setColorInput('#c-pagebg', 'pageBg', '--page-bg');
-  setColorInput('#c-panel', 'panel', '--panel');
-  setColorInput('#c-text', 'text', '--text');
+  setColorInput('#c-pagebg', 'pageBg', '--page-bg', '#e8e9ee');
+  setColorInput('#c-panel', 'panel', '--panel', '#ffffff');
+  setColorInput('#c-text', 'text', '--text', '#1d2030');
+  setColorInput('#c-pagebg2', 'pageBg2', '--page-bg-2', '#295ccb');
+  setColorInput('#c-sidebar2', 'sidebar2', '--sidebar-bg-2', '#2a5ccd');
+  const cg = $('#c-gradient'); if (cg) cg.checked = colors.gradient !== false;
   syncShellControls();
   $('#settings-modal').hidden = false;
 }
@@ -1565,35 +1586,53 @@ function ledgerDayLabel(dayStr) {
   const dow = DOW_KO[(new Date(y, m - 1, d).getDay() + 6) % 7];
   return `${m}월 ${d}일 · ${dow}`;
 }
-// 가계부 카테고리별 지출 통계 (도넛 + 막대). 라이브러리 없이 순수 CSS
+// 가계부 카테고리별 수입/지출 통계 (도넛 + 막대). 라이브러리 없이 순수 CSS
 function renderLedgerStats(ym) {
   const box = $('#ledger-stats'); if (!box) return;
-  const cats = sumByCategory(ledger, ym);
+  const label = ledgerStatsType === 'income' ? '수입' : '지출';
+  const cats = sumByCategory(ledger, ym, ledgerStatsType);
   const total = cats.reduce((s, c) => s + c.total, 0);
-  if (!cats.length || total <= 0) { box.innerHTML = ''; box.hidden = true; return; }
+  const otherHas = sumByCategory(ledger, ym, ledgerStatsType === 'income' ? 'expense' : 'income').length > 0;
+  // 두 구분 모두 비었을 때만 상자 숨김 — 한쪽만 비면 토글은 남기고 빈 안내(토글이 사라져 갇히는 문제 방지)
+  if ((!cats.length || total <= 0) && !otherHas) { box.innerHTML = ''; box.hidden = true; return; }
   box.hidden = false;
-  const max = cats[0].total;
-  let acc = 0;
-  const segs = cats.map((c) => {
-    const start = (acc / total) * 360; acc += c.total; const end = (acc / total) * 360;
-    return `${categoryColor(c.category)[1]} ${start}deg ${end}deg`;
-  }).join(', ');
-  const rows = cats.map((c) => {
-    const pct = Math.round((c.total / total) * 100);
-    const w = Math.max((c.total / max) * 100, 3);
-    const col = categoryColor(c.category)[1];
-    return `<div class="lstat-row">`
-      + `<span class="lstat-name"><i class="lstat-dot" style="background:${col}"></i>${textToHtml(c.category)}</span>`
-      + `<span class="lstat-bar"><span class="lstat-bar-fill" style="width:${w}%;background:${col}"></span></span>`
-      + `<span class="lstat-amt">${formatWon(c.total)} <em>${pct}%</em></span>`
+  const head =
+    `<div class="lstat-head"><span>이 달 ${label} 분석</span>`
+    + `<div class="seg-toggle seg-mini" id="lstat-type">`
+    + `<button type="button" class="seg-btn income${ledgerStatsType === 'income' ? ' on' : ''}" data-t="income">수입</button>`
+    + `<button type="button" class="seg-btn expense${ledgerStatsType === 'expense' ? ' on' : ''}" data-t="expense">지출</button>`
+    + `</div></div>`;
+  let body;
+  if (!cats.length || total <= 0) {
+    body = `<div class="lstat-empty">이 달 ${label} 내역이 없어요.</div>`;
+  } else {
+    const max = cats[0].total;
+    let acc = 0;
+    const segs = cats.map((c) => {
+      const start = (acc / total) * 360; acc += c.total; const end = (acc / total) * 360;
+      return `${categoryColor(c.category)[1]} ${start}deg ${end}deg`;
+    }).join(', ');
+    const rows = cats.map((c) => {
+      const pct = Math.round((c.total / total) * 100);
+      const w = Math.max((c.total / max) * 100, 3);
+      const col = categoryColor(c.category)[1];
+      return `<div class="lstat-row">`
+        + `<span class="lstat-name"><i class="lstat-dot" style="background:${col}"></i>${textToHtml(c.category)}</span>`
+        + `<span class="lstat-bar"><span class="lstat-bar-fill" style="width:${w}%;background:${col}"></span></span>`
+        + `<span class="lstat-amt">${formatWon(c.total)} <em>${pct}%</em></span>`
+        + `</div>`;
+    }).join('');
+    body = `<div class="lstat-body">`
+      + `<div class="lstat-donut" style="background:conic-gradient(${segs})"><div class="lstat-hole"><span>${label}</span><strong>${formatWon(total)}</strong></div></div>`
+      + `<div class="lstat-rows">${rows}</div>`
       + `</div>`;
-  }).join('');
-  box.innerHTML =
-    `<div class="lstat-head">이 달 지출 분석</div>`
-    + `<div class="lstat-body">`
-    + `<div class="lstat-donut" style="background:conic-gradient(${segs})"><div class="lstat-hole"><span>지출</span><strong>${formatWon(total)}</strong></div></div>`
-    + `<div class="lstat-rows">${rows}</div>`
-    + `</div>`;
+  }
+  box.innerHTML = head + body;
+  box.querySelectorAll('#lstat-type .seg-btn').forEach((b) => b.addEventListener('click', () => {
+    if (ledgerStatsType === b.dataset.t) return;
+    ledgerStatsType = b.dataset.t === 'income' ? 'income' : 'expense';
+    renderLedgerStats(ym); // 같은 ym 재사용 → 선택한 달 유지
+  }));
 }
 function renderLedger() {
   const monthEl = $('#ledger-month');
@@ -2413,6 +2452,10 @@ function bindUI() {
   bindColor('#c-pagebg', 'pageBg');
   bindColor('#c-panel', 'panel');
   bindColor('#c-text', 'text');
+  bindColor('#c-pagebg2', 'pageBg2');
+  bindColor('#c-sidebar2', 'sidebar2');
+  const cGrad = $('#c-gradient');
+  if (cGrad) cGrad.addEventListener('change', () => { colors.gradient = cGrad.checked; applyColors(colors); saveColors(); });
   $('#c-reset').addEventListener('click', resetColors);
   $('#c-title').addEventListener('input', () => { applyTitle($('#c-title').value); scheduleSave(); });
   $('#data-export').addEventListener('click', exportData);
@@ -2462,6 +2505,13 @@ function bindUI() {
     prefs.uiScale = Number(wSc.value);
     const sv = $('#w-scale-val'); if (sv) sv.textContent = prefs.uiScale + '%';
     if (window.api.win) window.api.win.setUiScale(prefs.uiScale);
+    scheduleSave();
+  });
+  const wFs = $('#w-fontscale');
+  if (wFs) wFs.addEventListener('input', () => {
+    prefs.fontScale = Number(wFs.value);
+    const fv = $('#w-fontscale-val'); if (fv) fv.textContent = prefs.fontScale + '%';
+    applyFontScale();
     scheduleSave();
   });
   // 마감 자동 알림 토글 + 알림 시각
@@ -2717,6 +2767,7 @@ async function init() {
   prefs.backgroundMaterial = ['none', 'frost', 'mica'].includes(_bm) ? _bm : 'none';
   prefs.blurIntensity = clampInt(p.blurIntensity, 0, 100, 30);
   prefs.uiScale = clampInt(p.uiScale, 80, 150, 100);
+  prefs.fontScale = clampInt(p.fontScale, 85, 130, 100);
   prefs.windowTransparent = (typeof p.windowTransparent === 'boolean') ? p.windowTransparent : false;
   prefs.notifyDeadlines = (typeof p.notifyDeadlines === 'boolean') ? p.notifyDeadlines : true;
   prefs.hideStickerTools = (typeof p.hideStickerTools === 'boolean') ? p.hideStickerTools : false;
@@ -2737,6 +2788,7 @@ async function init() {
   applyColors(colors);
   applyTitle(prefs.appTitle);
   applyGlassCss(); // 불투명/투명 표면 알파를 즉시 반영 (시작 시 깜빡임 방지)
+  applyFontScale(); // 저장된 글씨 크기 적용
   applyShell(); // 창 배율/재질을 네이티브 창과 동기화 (materialOk 확정 후 재적용)
   document.body.classList.toggle('hide-sticker-tools', !!prefs.hideStickerTools); // 스티커 버튼 툴바 표시 여부
   injectIcons();

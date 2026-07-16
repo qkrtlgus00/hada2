@@ -507,6 +507,36 @@ function setupYtSession() {
   ];
   sess.webRequest.onBeforeRequest({ urls: adHosts }, (_details, cb) => cb({ cancel: true }));
 }
+// ---- 광고 데이터 제거 (문서 시작 시점, 페이지 메인 월드) — best-effort ----
+// 유튜브가 광고를 그리기 '전에' 플레이어 응답에서 광고 필드만 삭제 → 광고가 아예 시작되지 않음.
+// 어느 훅이든 실패하면 조용히 무시 → 기존 음소거+스킵+빨리감기(ytPlayJs/폴링)가 그대로 최종 방어선.
+const YT_AD_STRIP = true; // 문제 생기면 false로 — 즉시 기존(음소거+스킵) 동작으로 복귀
+const YT_ADSTRIP_JS = "(function(){" +
+  "if(window.__adStrip)return;window.__adStrip=true;" +
+  "var K=['adPlacements','adSlots','playerAds','adBreakHeartbeatParams'];" +
+  "function strip(o){try{if(o&&typeof o==='object'){for(var i=0;i<K.length;i++){if(K[i] in o){try{delete o[K[i]];}catch(e){}}}" +
+    "if(o.playerResponse)strip(o.playerResponse);}}catch(e){}return o;}" +
+  "try{var _p;Object.defineProperty(window,'ytInitialPlayerResponse',{configurable:true," +
+    "get:function(){return _p;},set:function(v){_p=strip(v);}});}catch(e){}" +
+  "try{var oj=Response.prototype.json;Response.prototype.json=function(){return oj.apply(this,arguments).then(strip);};}catch(e){}" +
+  "try{var op=JSON.parse;JSON.parse=function(){return strip(op.apply(JSON,arguments));};}catch(e){}" +
+  "})();";
+// 프리로드 파일을 userData에 런타임 생성 — UP_FILES(자체 업데이트 파일 목록)에 새 파일을 추가하면
+// 구버전 업데이터가 못 받는 닭-달걀 문제가 있어, main.js가 직접 써서 배포/업데이트 경로와 무관하게 동작.
+let ytPreloadPath = null;
+function ensureYtPreload() {
+  if (!YT_AD_STRIP) return null;
+  if (ytPreloadPath) return ytPreloadPath;
+  try {
+    const f = path.join(app.getPath('userData'), 'yt-preload.js');
+    // 샌드박스 프리로드: webFrame.executeJavaScript가 페이지(메인 월드)에서 문서 시작 시점에 실행됨
+    fs.writeFileSync(f,
+      "try{var p=require('electron').webFrame.executeJavaScript(" + JSON.stringify(YT_ADSTRIP_JS) + ");" +
+      "p&&p.catch&&p.catch(function(){});}catch(e){}", 'utf8');
+    ytPreloadPath = f;
+  } catch (_) { ytPreloadPath = null; } // 쓰기 실패 → 프리로드 없이 기존 동작
+  return ytPreloadPath;
+}
 function ytPlayJs(vol) {
   // 로드 후: 음량 적용+재생, autonav 끄기, ended→즉시 정지. 광고는 스킵 버튼 클릭+빨리감기로 넘김.
   // 소리 차단(광고/다른 곡)은 메인 프로세스의 setAudioMuted가 담당 → 여기선 v.muted 미사용.
@@ -556,6 +586,7 @@ ipcMain.handle('youtube:play', async (_e, url) => {
     ytExpectedId = m ? m[1] : '';
     ytEndedSent = false;
     if (!ytWindow || ytWindow.isDestroyed()) {
+      const ytPre = ensureYtPreload();
       ytWindow = new BrowserWindow({
         width: 480,
         height: 360,
@@ -566,11 +597,16 @@ ipcMain.handle('youtube:play', async (_e, url) => {
           contextIsolation: true, nodeIntegration: false, sandbox: true,
           backgroundThrottling: false, // 숨김 상태에서도 재생 유지
           partition: 'ytmusic', // 광고 차단 세션
+          ...(ytPre ? { preload: ytPre } : {}),
         },
       });
       ytWindow.on('closed', () => { ytWindow = null; stopYtPoll(); });
       ytWindow.webContents.on('did-finish-load', () => {
         ytWindow.webContents.executeJavaScript(ytPlayJs(ytVolume)).catch(() => {});
+        // 자가 점검: 프리로드의 광고 제거 훅이 실제로 걸렸는지 확인 (실패해도 기존 방어선으로 동작)
+        ytWindow.webContents.executeJavaScript('!!window.__adStrip').then((on) => {
+          if (!on && YT_AD_STRIP) console.warn('[yt] ad-strip inactive — falling back to mute+skip only');
+        }).catch(() => {});
       });
       // 내비게이션 가드: 요청한 영상이 아닌 다른 watch 페이지로 이동(autonav/추천 등)하면
       // 즉시 정지하고 '곡 종료'로 처리 → 렌더러의 반복/다음곡 로직이 올바른 곡으로 이어감.
