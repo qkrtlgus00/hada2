@@ -55,6 +55,7 @@ let prefs = {
   hideStickerTools: false, // 켜면 스티커 클릭 시 버튼 툴바(잠금·투명·앞·뒤·×) 안 뜸
   manual: { ledger: false, works: false },
   workFilter: 'month', // 작업 관리 필터: 'all' | 'week' | 'month'
+  hideDoneWorks: false, // 켜면 작업 관리 목록에서 완료 항목을 숨김(집계는 그대로 유지)
 };
 let miniMonth = new Date(); // 미니 달력이 보는 달
 let weekStart = startOfWeek(new Date()); // 현재 보는 주의 월요일
@@ -1730,6 +1731,7 @@ function renderWorks() {
   const monthEl = $('#deadline-month');
   if (monthEl && monthEl.value !== deadlineMonth) monthEl.value = deadlineMonth;
   document.querySelectorAll('#work-filter .seg-btn').forEach((b) => b.classList.toggle('on', b.dataset.wf === workFilter));
+  { const whd = $('#work-hide-done'); if (whd) whd.checked = !!prefs.hideDoneWorks; }
 
   // 필터 적용: 전체 / 주간(이번 주) / 월(deadlineMonth)
   let scope = works;
@@ -1756,10 +1758,11 @@ function renderWorks() {
 
   const items = prefs.manual.works ? [...scope] : [...scope].sort((a, b) =>
     (WORK_ORDER[a.status] - WORK_ORDER[b.status]) || String(a.due || '').localeCompare(String(b.due || '')));
+  const shown = prefs.hideDoneWorks ? items.filter((d) => d.status !== '완료') : items;
   list.innerHTML = '';
   if (!items.length) { list.innerHTML = '<div class="empty-hint">등록된 작업이 없어요.</div>'; return; }
 
-  for (const it of items) {
+  for (const it of shown) {
     const doneStatus = it.status === '완료';
     const n = it.due ? daysUntil(it.due, today) : null;
     let cls = '';
@@ -2666,6 +2669,8 @@ function bindUI() {
     workFilter = (b.dataset.wf === 'week') ? 'week' : 'all';
     prefs.workFilter = workFilter; scheduleSave(); renderWorks();
   }));
+  const whd = $('#work-hide-done');
+  if (whd) whd.addEventListener('change', () => { prefs.hideDoneWorks = whd.checked; scheduleSave(); renderWorks(); });
 
   // 작업 관리: '+ 작업 추가' 버튼이 작업 모달을 신규 모드로 엶 (인라인 폼 제거, 배선은 작업 모달부)
 
@@ -2882,6 +2887,7 @@ async function init() {
   prefs.windowTransparent = (typeof p.windowTransparent === 'boolean') ? p.windowTransparent : false;
   prefs.notifyDeadlines = (typeof p.notifyDeadlines === 'boolean') ? p.notifyDeadlines : true;
   prefs.hideStickerTools = (typeof p.hideStickerTools === 'boolean') ? p.hideStickerTools : false;
+  prefs.hideDoneWorks = (typeof p.hideDoneWorks === 'boolean') ? p.hideDoneWorks : false;
   prefs.deadlineNotifyTime = /^([01]?\d|2[0-3]):[0-5]\d$/.test(p.deadlineNotifyTime) ? p.deadlineNotifyTime : '09:00';
   prefs.uiRevamp = p.uiRevamp || '';
   firedReminders = (data && data.firedReminders && typeof data.firedReminders === 'object') ? data.firedReminders : {};

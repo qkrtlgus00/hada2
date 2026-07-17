@@ -587,7 +587,7 @@ body.is-max #tb-max .i-restore { display: block; }
 .field input:focus, .field textarea:focus { outline: 2px solid var(--primary); outline-offset: 0; }
 .field-row { display: flex; gap: 10px; }
 .field-row .field { flex: 1; }
-.field-check { display: flex; align-items: center; gap: 8px; font-size: calc(13px * var(--fs)); cursor: pointer; }
+.field-check { display: flex; align-items: center; gap: 8px; font-size: calc(13px * var(--fs)); cursor: pointer; white-space: nowrap; }
 .field-check input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--primary); flex: 0 0 auto; cursor: pointer; }
 .field-check em { font-style: normal; font-size: calc(11.5px * var(--fs)); color: var(--text-mute); }
 .field.grow { flex: 2; }

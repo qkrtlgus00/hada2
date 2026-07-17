@@ -507,6 +507,7 @@ ipcMain.handle('open:external', async (_e, url) => {
 // (영상 화면은 안 보이고 오디오만 흐름 → 임베드가 막힌 영상도 재생됨)
 let ytWindow = null;
 let ytVolume = 1;        // 0..1 — 현재 음량 (렌더러 prefs.ytVolume/100). 새 곡 로드 시에도 적용
+let ytWantPlaying = true; // 사용자가 '재생 중'을 원하는 상태 — 일시정지 후 늦은 주입(dom-ready/did-finish-load)·__ytboot 재시도가 play()로 재생을 되살리지 않게 하는 게이트
 let ytExpectedId = '';   // youtube:play로 요청한 영상 ID — 다른 영상으로 이탈(드리프트) 감지용
 let ytEndedSent = false; // youtube:ended 중복 전송 방지 (폴링/내비게이션 가드 동시 발화 대비)
 let ytNavPending = false; // youtube:play의 loadURL 커밋 전(이전 문서 잔존) — 폴링의 ended/드리프트 판정 유예
@@ -565,16 +566,18 @@ function ensureYtPreload() {
   } catch (_) { ytPreloadPath = null; } // 쓰기 실패 → 프리로드 없이 기존 동작
   return ytPreloadPath;
 }
-function ytPlayJs(vol) {
+function ytPlayJs(vol, want) {
   // 로드 후: 음량 적용+재생, autonav 끄기, ended→즉시 정지. 광고는 스킵 버튼 클릭+빨리감기로 넘김.
   // 소리 차단(광고/다른 곡)은 메인 프로세스의 setAudioMuted가 담당 → 여기선 v.muted 미사용.
+  // want(=ytWantPlaying): 일시정지 상태로 재주입돼도 play()가 재생을 되살리지 않게 하는 게이트.
   return "(function(){" +
     "window.__ytvol=" + vol + ";" +
+    "window.__ytwant=(" + (want === false ? 'false' : 'true') + ");" +
     // 볼륨 설정 헬퍼: 플레이어 API(mp.setVolume)로 '플레이어 자체 볼륨'을 사용자값으로 → 로드 시 유튜브가 100으로 덮는 것 방지. video.volume도 폴백.
     "window.__setvol=function(){try{var mp=document.querySelector('#movie_player');if(mp&&mp.setVolume){mp.setVolume(Math.round((window.__ytvol||0)*100));if((window.__ytvol||0)>0&&mp.isMuted&&mp.isMuted()&&mp.unMute){mp.unMute();}}var vs=document.querySelectorAll('video');for(var i=0;i<vs.length;i++){vs[i].volume=window.__ytvol;}}catch(e){}};" +
     // <video>가 아직 없으면(dom-ready 직후 등) 100ms 간격으로 최대 5초 기다렸다가 생기는 즉시 재생 시작.
     "function boot(){var v=document.querySelector('video');if(!v)return false;" +
-      "v.volume=window.__ytvol; v.play&&v.play(); v.addEventListener('ended',function(){try{v.pause();}catch(e){}});" +
+      "v.volume=window.__ytvol; if(window.__ytwant!==false){v.play&&v.play();} v.addEventListener('ended',function(){try{v.pause();}catch(e){}});" +
       "window.__setvol();return true;}" +
     "if(!boot()&&!window.__ytboot){var n=0;window.__ytboot=setInterval(function(){try{n++;" +
       "if(boot()||n>50){clearInterval(window.__ytboot);window.__ytboot=0;}" +
@@ -587,7 +590,7 @@ function ytPlayJs(vol) {
       "window.__setvol&&window.__setvol();" +
       "var adp=false; try{adp=!!(mp&&mp.getAdState&&mp.getAdState()===1);}catch(e){}" +
       "var adc=!!(p&&p.classList.contains('ad-showing'));" +
-      "if(adp||adc){" +
+      "if((adp||adc)&&window.__ytwant!==false){" + // 일시정지 중엔 스킵 클릭/빨리감기 금지 — 플레이어를 되살릴 수 있음 (__setvol은 위에서 계속)
         "var s=document.querySelector('.ytp-ad-skip-button,.ytp-ad-skip-button-modern,.ytp-skip-ad-button,.ytp-ad-skip-button-slot button,.ytp-ad-skip-button-container button');" +
         "if(s){s.click();}" +
         "if(adp && av&&av.duration&&isFinite(av.duration)){av.currentTime=av.duration;}" + // 확정 광고(getAdState===1)에서만 빨리감기 — ad-showing 클래스만으론 본곡을 끝내지 않음
@@ -701,6 +704,7 @@ ipcMain.handle('youtube:play', async (_e, url) => {
     const m = url.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
     ytExpectedId = m ? m[1] : '';
     ytEndedSent = false;
+    ytWantPlaying = true; // 새 곡은 항상 재생 — loadURL 전에 게이트를 열어 이후 주입(ytPlayJs)이 play() 하게
     if (!ytWindow || ytWindow.isDestroyed()) {
       const ytPre = ensureYtPreload();
       ytWindow = new BrowserWindow({
@@ -718,7 +722,7 @@ ipcMain.handle('youtube:play', async (_e, url) => {
       });
       ytWindow.on('closed', () => { ytWindow = null; stopYtPoll(); });
       ytWindow.webContents.on('did-finish-load', () => {
-        ytWindow.webContents.executeJavaScript(ytPlayJs(ytVolume)).catch(() => {});
+        ytWindow.webContents.executeJavaScript(ytPlayJs(ytVolume, ytWantPlaying)).catch(() => {});
         // 자가 점검: 프리로드의 광고 제거 훅이 실제로 걸렸는지 확인 (실패해도 기존 방어선으로 동작)
         ytWindow.webContents.executeJavaScript('!!window.__adStrip').then((on) => {
           if (!on && YT_AD_STRIP) console.warn('[yt] ad-strip inactive — falling back to mute+skip only');
@@ -727,7 +731,7 @@ ipcMain.handle('youtube:play', async (_e, url) => {
       // dom-ready(HTML 파싱 완료)에도 주입 — 전체 로드보다 0.5~2s 이름. ytPlayJs는 재실행 안전
       // (__adskip/__ytboot 가드, play()/볼륨 멱등) → 둘 다 걸어 이른 쪽이 먼저 재생을 시작.
       ytWindow.webContents.on('dom-ready', () => {
-        ytWindow.webContents.executeJavaScript(ytPlayJs(ytVolume)).catch(() => {});
+        ytWindow.webContents.executeJavaScript(ytPlayJs(ytVolume, ytWantPlaying)).catch(() => {});
       });
       // 내비게이션 가드: 요청한 영상이 아닌 다른 watch 페이지로 이동(autonav/추천 등)하면
       // 즉시 정지하고 '곡 종료'로 처리 → 렌더러의 반복/다음곡 로직이 올바른 곡으로 이어감.
@@ -855,8 +859,10 @@ function ytExec(js) {
   }
   return Promise.resolve();
 }
-ipcMain.handle('youtube:pause', async () => { await ytExec("document.querySelector('video')&&document.querySelector('video').pause();"); return { ok: true }; });
-ipcMain.handle('youtube:resume', async () => { await ytExec("document.querySelector('video')&&document.querySelector('video').play();"); return { ok: true }; });
+// 일시정지에 '기억'을 부여: 플래그를 메인(ytWantPlaying)과 페이지(__ytwant) 양쪽에 심어
+// 뒤늦은 dom-ready/did-finish-load 재주입·__ytboot 재시도의 play()가 재생을 되살리지 않게 한다.
+ipcMain.handle('youtube:pause', async () => { ytWantPlaying = false; await ytExec("window.__ytwant=false; var v=document.querySelector('video'); v&&v.pause();"); return { ok: true }; });
+ipcMain.handle('youtube:resume', async () => { ytWantPlaying = true; await ytExec("window.__ytwant=true; var v=document.querySelector('video'); v&&v.play&&v.play();"); return { ok: true }; });
 ipcMain.handle('youtube:stop', async () => {
   stopYtPoll();
   if (ytWindow && !ytWindow.isDestroyed()) ytWindow.close();
