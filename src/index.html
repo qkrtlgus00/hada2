@@ -55,9 +55,9 @@
       </nav>
 
       <div class="sidebar-foot" id="sidebar-foot">
-        <p class="nav-label">오늘 요약</p>
-        <div class="sb-stat"><span class="ico" data-icon="check"></span><span class="sb-stat-label">남은 할 일</span><b id="sb-stat-todo">0</b></div>
-        <div class="sb-stat"><span class="ico" data-icon="clock"></span><span class="sb-stat-label">다가오는 마감</span><b id="sb-stat-due">0</b></div>
+        <p class="nav-label" id="sb-foot-title">오늘 요약</p>
+        <div class="sb-stat" id="sb-stat-todo-row"><span class="ico" data-icon="check"></span><span class="sb-stat-label">남은 할 일</span><b id="sb-stat-todo">0</b></div>
+        <div class="sb-stat" id="sb-stat-due-row"><span class="ico" data-icon="clock"></span><span class="sb-stat-label">다가오는 마감</span><b id="sb-stat-due">0</b></div>
       </div>
     </aside>
 
@@ -177,7 +177,10 @@
           <h1 class="view-title">작업 관리</h1>
           <div class="month-filter">
             <input type="month" id="deadline-month" class="mini-select" />
-            <button class="soft-btn" id="deadline-all">전체</button>
+            <div class="seg-toggle work-filter" id="work-filter">
+              <button type="button" class="seg-btn" data-wf="all">전체</button>
+              <button type="button" class="seg-btn" data-wf="week">주간</button>
+            </div>
             <button class="soft-btn" id="deadline-auto" title="상태·마감순 자동 정렬">자동 정렬</button>
             <button class="add-btn" id="work-add">+ 작업 추가</button>
           </div>

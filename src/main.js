@@ -607,6 +607,90 @@ ipcMain.handle('youtube:title', async (_e, url) => {
     return { ok: false, error: String((e && e.message) || e) };
   }
 });
+// 재생목록 → 개별 곡 목록으로 '펼치기' (추가 시 1회만 사용)
+// 재생 경로는 ytExpectedId(단일 곡 고정) 가정 위에 서 있으므로 재생목록을 직접 재생하지 않는다.
+// 대신 추가 시점에 곡들로 펼쳐 넣어, 이후엔 손으로 하나씩 넣은 곡과 완전히 동일하게 취급.
+// 주의: 재생용 ytWindow는 절대 건드리지 않음(재생 중일 수 있음) — 전용 임시 숨은 창을 만들고 반드시 파괴.
+ipcMain.handle('youtube:playlist', async (_e, listId) => {
+  if (typeof listId !== 'string' || !/^[a-zA-Z0-9_-]{2,60}$/.test(listId)) return { ok: false, reason: 'BAD_ID' };
+  // RD… 는 유튜브가 즉석에서 만드는 믹스/라디오 — 유한한 목록이 아니라 펼치기가 무의미
+  if (/^RD/i.test(listId)) return { ok: false, reason: 'MIX' };
+  let win = null;
+  let timer = null;
+  try {
+    setupYtSession(); // 광고 요청 차단 세션 공유 (세션만 공유 — 창은 ytWindow와 별개라 재생에 영향 없음)
+    win = new BrowserWindow({
+      width: 480,
+      height: 360,
+      show: false, // 숨김 — 화면에 띄우지 않음
+      webPreferences: {
+        contextIsolation: true, nodeIntegration: false, sandbox: true,
+        backgroundThrottling: false, // 숨김 상태에서도 로드가 멈추지 않게
+        partition: 'ytmusic',
+      },
+    });
+    const work = (async () => {
+      await win.loadURL('https://www.youtube.com/playlist?list=' + encodeURIComponent(listId));
+      // ytInitialData 전체를 '재귀'로 훑어 playlistVideoRenderer만 수집.
+      // (contents.twoColumnBrowseResultsRenderer… 같은 고정 경로는 유튜브가 수시로 바꿔 금방 깨짐)
+      return await win.webContents.executeJavaScript(
+        "(function(){" +
+        "var out=[],more=false,got={},seen=(typeof WeakSet!=='undefined')?new WeakSet():null;" +
+        // '#' 접두사 — 영상 ID가 'constructor' 같은 Object 기본 속성명과 겹쳐도 오작동하지 않게
+        "function add(id,t){if(!id||got['#'+id])return;got['#'+id]=1;out.push({videoId:String(id),title:String(t||'')});}" +
+        "function walk(o,d){try{" +
+          "if(!o||typeof o!=='object'||d>60)return;" + // 깊이 제한 + 방문 기록 — 순환/비정상 구조 방어
+          "if(seen){if(seen.has(o))return;seen.add(o);}" +
+          // 구형 구조 — 유튜브가 화면/계정별로 A/B로 뿌리므로 신형과 '둘 다' 받는다
+          "var r=o.playlistVideoRenderer;" +
+          "if(r&&r.videoId){var t='';" +
+            "try{t=(r.title&&r.title.runs&&r.title.runs[0]&&r.title.runs[0].text)||(r.title&&r.title.simpleText)||'';}catch(e){}" +
+            "add(r.videoId,t);}" +
+          // 신형 구조 — 유튜브가 재생목록 화면을 lockupViewModel로 바꿈(실측 확인: 49곡 전부 여기서 나옴).
+          // videoId=contentId, 제목=metadata.lockupMetadataViewModel.title.content
+          "var lv=o.lockupViewModel;" +
+          "if(lv&&lv.contentId&&(!lv.contentType||lv.contentType==='LOCKUP_CONTENT_TYPE_VIDEO')){var lt='';" +
+            "try{var mt=lv.metadata&&lv.metadata.lockupMetadataViewModel&&lv.metadata.lockupMetadataViewModel.title;" +
+            "lt=(mt&&(mt.content||(mt.runs&&mt.runs[0]&&mt.runs[0].text)))||'';}catch(e){}" +
+            "add(lv.contentId,lt);}" +
+          "if(o.continuationItemRenderer){more=true;}" + // 100곡 초과 목록 — 초기 데이터엔 '이어보기' 토큰만 옴
+          "if(Array.isArray(o)){for(var i=0;i<o.length;i++)walk(o[i],d+1);return;}" +
+          "for(var k in o){if(Object.prototype.hasOwnProperty.call(o,k))walk(o[k],d+1);}" +
+        "}catch(e){}}" +
+        "walk(window.ytInitialData,0);" +
+        "return {items:out,more:more};" +
+        "})();"
+      );
+    })();
+    work.catch(() => {}); // 타임아웃 패배 후 창 파괴로 늦게 reject돼도 unhandled 경고가 없게
+    const res = await Promise.race([
+      work,
+      new Promise((_res, rej) => { timer = setTimeout(() => rej(new Error('TIMEOUT')), 15000); }),
+    ]);
+    const raw = (res && Array.isArray(res.items)) ? res.items : null;
+    if (!raw) return { ok: false, reason: 'NO_DATA' };
+    // 형식이 맞는 항목만 통과 (11자 영상 ID) — 페이지 구조가 바뀌어 이상한 값이 섞여도 차단
+    const items = [];
+    for (const it of raw) {
+      if (it && typeof it.videoId === 'string' && /^[a-zA-Z0-9_-]{11}$/.test(it.videoId)) {
+        items.push({ videoId: it.videoId, title: typeof it.title === 'string' ? it.title.slice(0, 200) : '' });
+      }
+    }
+    if (!items.length) return { ok: false, reason: 'EMPTY' }; // 비공개·빈 목록·로그인 필요 등
+    // 잘렸으면 숨기지 않고 알림 (렌더러가 토스트로 고지).
+    // 유튜브 초기 데이터는 100곡까지만 실어 보내므로 '정확히 100곡'이면 더 있을 수 있다고 본다.
+    // ('이어보기' 표시(more)는 신형 구조에서 안 올 수 있어 개수로도 막는다 — 딱 100곡짜리 목록에
+    //  "앞 100곡만"이 뜨는 건 사소한 오차지만, 곡이 조용히 사라지는 것보다 낫다.)
+    const truncated = items.length >= 100 || !!res.more;
+    return { ok: true, items: items.slice(0, 100), truncated };
+  } catch (e) {
+    const msg = String((e && e.message) || e);
+    return { ok: false, reason: msg === 'TIMEOUT' ? 'TIMEOUT' : msg };
+  } finally {
+    if (timer) clearTimeout(timer);
+    try { if (win && !win.isDestroyed()) win.destroy(); } catch (_) {} // 임시 창 누수 = 조용한 메모리/CPU 낭비 — 반드시 파괴
+  }
+});
 ipcMain.handle('youtube:play', async (_e, url) => {
   if (typeof url !== 'string' || !/^https:\/\/(www\.)?youtube\.com\//.test(url)) {
     return { ok: false, error: 'BAD_URL' };

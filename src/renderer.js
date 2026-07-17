@@ -43,6 +43,7 @@ let ledgerType = 'expense'; // 가계부 입력 구분
 let ledgerStatsType = 'expense'; // 통계(이 달 분석) 구분 토글 — 세션 유지, 저장 안 함
 let currentView = 'calendar';
 let deadlineMonth = ''; // 작업 월 필터 ('' = 전체)
+let workFilter = 'month'; // 작업 관리 필터 모드: 'all' | 'week' | 'month'
 // UI 설정(테마/색/제목/사이드바접힘/음량/창 셸/알림) — data.json에 저장(origin 무관 영구)
 let prefs = {
   theme: 'light', colors: {}, viewColors: {}, appTitle: '하다', sidebarCollapsed: false,
@@ -53,6 +54,7 @@ let prefs = {
   deadlineNotifyTime: '09:00', // 마감 알림 시각(HH:MM) — 전날·당일 이 시각에
   hideStickerTools: false, // 켜면 스티커 클릭 시 버튼 툴바(잠금·투명·앞·뒤·×) 안 뜸
   manual: { ledger: false, works: false },
+  workFilter: 'month', // 작업 관리 필터: 'all' | 'week' | 'month'
 };
 let miniMonth = new Date(); // 미니 달력이 보는 달
 let weekStart = startOfWeek(new Date()); // 현재 보는 주의 월요일
@@ -1554,7 +1556,7 @@ function renderHome() {
   const memoPreview = recentNote ? (notePreview(recentNote).slice(0, 24) || '(빈 메모)') : '없음';
   const cards = [
     { ic: 'calendar', label: '오늘 일정', value: `${todayEvents}건`, view: 'calendar' },
-    { ic: 'check', label: '남은 할일', value: `${activeTodos}개`, view: 'calendar' },
+    { ic: 'check', label: '남은 할일', value: `${activeTodos}개`, view: 'todos' },
     { ic: 'clock', label: '다가오는 마감', value: upcoming.length ? `${upcoming[0].title} · ${ddayLabel(daysUntil(upcoming[0].due, today))}` : '없음', view: 'deadlines' },
     { ic: 'wallet', label: '이번 달 지출', value: formatWon(led.expense), view: 'ledger' },
     { ic: 'check', label: '진행중 작업', value: works.filter((w) => w.status === '진행중').length + '건', view: 'deadlines' },
@@ -1727,16 +1729,24 @@ function renderWorks() {
   const today = ymd(new Date());
   const monthEl = $('#deadline-month');
   if (monthEl && monthEl.value !== deadlineMonth) monthEl.value = deadlineMonth;
+  document.querySelectorAll('#work-filter .seg-btn').forEach((b) => b.classList.toggle('on', b.dataset.wf === workFilter));
 
-  // 월 필터 적용 (deadlineMonth '' = 전체)
-  const scope = deadlineMonth ? works.filter((d) => monthKey(d.due) === deadlineMonth) : works;
+  // 필터 적용: 전체 / 주간(이번 주) / 월(deadlineMonth)
+  let scope = works;
+  if (workFilter === 'week') {
+    const wa = ymd(startOfWeek(new Date())), wb = ymd(addDays(startOfWeek(new Date()), 6));
+    scope = works.filter((d) => d.due && d.due >= wa && d.due <= wb);
+  } else if (workFilter === 'month' && deadlineMonth) {
+    scope = works.filter((d) => monthKey(d.due) === deadlineMonth);
+  }
 
   // 상단 요약: 상태별 건수 + 금액 합계 (필터 범위 기준)
   const cnt = (st) => scope.filter((d) => d.status === st).length;
   const totalAll = scope.reduce((s, d) => s + (Number(d.amount) || 0), 0);
   const sum = $('#deadline-summary');
   if (sum) {
-    const label = deadlineMonth ? deadlineMonth.replace('-', '년 ') + '월' : '전체';
+    const label = workFilter === 'week' ? weekRangeLabel(startOfWeek(new Date()))
+      : (workFilter === 'month' && deadlineMonth) ? deadlineMonth.replace('-', '년 ') + '월' : '전체';
     sum.innerHTML =
       `<div class="lsum"><span>대기</span><strong>${cnt('대기')}건</strong></div>` +
       `<div class="lsum"><span>진행중</span><strong>${cnt('진행중')}건</strong></div>` +
@@ -2124,6 +2134,89 @@ function renderYouTube() {
   filterCurrentRows();
 }
 
+// ---- 재생목록 펼쳐 넣기 (추가 시 1회) ----
+// 재생 경로는 '단일 곡 고정' 가정 위에 있어 재생목록을 직접 틀지 않는다.
+// 추가 시점에 곡들로 펼쳐 넣으면 이후엔 손으로 하나씩 넣은 곡과 완전히 동일.
+function ytCanExpand() { return !!(window.api.youtube && window.api.youtube.playlist); }
+// 곡+재생목록이 함께 있는 링크 → 무엇을 추가할지 묻는 모달
+// (index.html 수정 없이 기존 modal-overlay/modal 마크업·클래스를 그대로 재사용해 동적 생성)
+let ytChoiceResolve = null;
+function ytChoiceDone(v) {
+  const m = $('#yt-choice-modal'); if (m) m.hidden = true;
+  const r = ytChoiceResolve; ytChoiceResolve = null;
+  if (r) r(v);
+}
+function ensureYtChoiceModal() {
+  if ($('#yt-choice-modal')) return;
+  const ov = document.createElement('div');
+  ov.className = 'modal-overlay'; ov.id = 'yt-choice-modal'; ov.hidden = true;
+  ov.innerHTML =
+    '<div class="modal">' +
+      '<div class="modal-head">' +
+        '<h2>재생목록 링크</h2>' +
+        '<button type="button" class="icon-btn ghost" id="yt-choice-close" aria-label="닫기">✕</button>' +
+      '</div>' +
+      '<div class="modal-body">' +
+        '<p class="hint">링크에 곡 하나와 재생목록이 함께 들어 있어요. 어떻게 추가할까요?</p>' +
+        '<div class="modal-actions">' +
+          '<span class="spacer"></span>' +
+          '<button type="button" class="soft-btn" id="yt-choice-one">이 곡 하나만</button>' +
+          '<button type="button" class="add-btn" id="yt-choice-all">재생목록 전체</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('click', (e) => { if (e.target === ov) ytChoiceDone(null); }); // 배경 클릭 = 취소 (다른 모달과 동일)
+  $('#yt-choice-close').addEventListener('click', () => ytChoiceDone(null));
+  $('#yt-choice-one').addEventListener('click', () => ytChoiceDone('one'));
+  $('#yt-choice-all').addEventListener('click', () => ytChoiceDone('all'));
+}
+// '이 곡 하나만'|'재생목록 전체'|취소 → 'one'|'all'|null
+function askYtChoice() {
+  ensureYtChoiceModal();
+  return new Promise((resolve) => {
+    ytChoiceDone(null); // 혹시 떠 있던 이전 질문은 취소로 정리
+    ytChoiceResolve = resolve;
+    const m = $('#yt-choice-modal'); if (m) m.hidden = false;
+  });
+}
+// 재생목록의 곡들을 목록에 추가. 추가/건너뜀/잘림을 토스트로 정직하게 보고.
+async function addPlaylistTracks(listId) {
+  if (!ytCanExpand()) { toast('업데이트가 필요해요(재생목록).'); return; }
+  const btn = $('#yt-form button[type="submit"]');
+  if (btn) btn.disabled = true; // 숨은 창의 페이지 로드라 몇 초 걸림 — 중복 제출 방지
+  toast('재생목록 불러오는 중…');
+  try {
+    const r = await window.api.youtube.playlist(listId);
+    if (!r || !r.ok) {
+      if (r && r.reason === 'MIX') toast('유튜브가 자동으로 만드는 믹스/라디오는 목록으로 가져올 수 없어요');
+      else if (r && r.reason === 'EMPTY') toast('재생목록에서 곡을 찾지 못했어요 (비공개·빈 목록일 수 있어요)');
+      else toast('재생목록을 불러오지 못했어요');
+      return;
+    }
+    const have = new Set(playlist.map((x) => x.videoId).filter(Boolean));
+    let added = 0, skipped = 0;
+    for (const it of r.items || []) {
+      if (!it || !it.videoId) continue;
+      if (have.has(it.videoId)) { skipped++; continue; } // 이미 있는 곡(같은 목록 안 중복 포함)은 건너뜀
+      have.add(it.videoId);
+      const url = 'https://www.youtube.com/watch?v=' + it.videoId; // 곡별 표준 watch URL — 단일 곡 추가와 동일 형태
+      playlist.push({ id: crypto.randomUUID(), title: it.title || url, url, videoId: it.videoId, listId });
+      added++;
+    }
+    if (added) { $('#yt-url').value = ''; $('#yt-title-in').value = ''; scheduleSave(); renderYouTube(); }
+    let msg;
+    if (added) msg = skipped ? `${added}곡 추가 (${skipped}곡은 이미 있어 건너뜀)` : `${added}곡 추가`;
+    else msg = skipped ? '모두 이미 있는 곡이라 추가하지 않았어요' : '재생목록에서 곡을 찾지 못했어요';
+    if (r.truncated) msg += ' — 앞 100곡만 가져왔어요';
+    toast(msg);
+  } catch (_) {
+    toast('재생목록을 불러오지 못했어요');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 // ---- 홈 배너 ----
 async function setBanner() {
   if (!(window.api.image && window.api.image.pick)) { toast('업데이트가 필요해요(배너).'); return; }
@@ -2290,7 +2383,7 @@ function renderStickers() {
         if (moved) { selectedStickerId = s.id; markStickerSelection(); scheduleSave(); return; } // 이동(드래그) 후 선택 유지
         // 클릭(안 움직임): 밑에 사이드바 탭/버튼이 있으면 그걸 우선 실행(탭 우선), 없으면 스티커 선택 토글
         const navEl = document.elementsFromPoint(ev.clientX, ev.clientY)
-          .map((n) => (n.closest ? n.closest('[data-nav], #sidebar-collapse, .brand') : null))
+          .map((n) => (n.closest ? n.closest('[data-nav], #sidebar-collapse, .brand, #sb-foot-title, .sb-stat') : null))
           .find(Boolean);
         if (navEl) { selectedStickerId = null; markStickerSelection(); navEl.click(); } // 탭 우선
         else { selectedStickerId = (selectedStickerId === s.id ? null : s.id); markStickerSelection(); } // 스티커 선택 토글
@@ -2441,6 +2534,10 @@ function bindUI() {
       showView(target);
     });
   });
+  // 오늘 요약: 제목 → 홈(빠른 액세스), 각 줄 → 해당 화면
+  $('#sb-foot-title').addEventListener('click', () => activateNavByTarget('home'));
+  $('#sb-stat-todo-row').addEventListener('click', () => activateNavByTarget('todos'));
+  $('#sb-stat-due-row').addEventListener('click', () => activateNavByTarget('deadlines'));
 
   // 설정(색상) 모달
   $('#settings-close').addEventListener('click', closeSettingsModal);
@@ -2563,21 +2660,33 @@ function bindUI() {
   if (lmToggle) lmToggle.querySelectorAll('.seg-btn').forEach((b) => b.addEventListener('click', () => setLedgerModalType(b.dataset.t)));
   $('#ledger-month').addEventListener('change', renderLedger);
 
-  // 작업 월 필터
-  $('#deadline-month').addEventListener('change', () => { deadlineMonth = $('#deadline-month').value; renderWorks(); });
-  $('#deadline-all').addEventListener('click', () => { deadlineMonth = ''; $('#deadline-month').value = ''; renderWorks(); });
+  // 작업 필터: 월 선택 / 전체·주간 토글
+  $('#deadline-month').addEventListener('change', () => { deadlineMonth = $('#deadline-month').value; workFilter = 'month'; prefs.workFilter = 'month'; scheduleSave(); renderWorks(); });
+  document.querySelectorAll('#work-filter .seg-btn').forEach((b) => b.addEventListener('click', () => {
+    workFilter = (b.dataset.wf === 'week') ? 'week' : 'all';
+    prefs.workFilter = workFilter; scheduleSave(); renderWorks();
+  }));
 
   // 작업 관리: '+ 작업 추가' 버튼이 작업 모달을 신규 모드로 엶 (인라인 폼 제거, 배선은 작업 모달부)
 
-  // 유튜브
-  $('#yt-form').addEventListener('submit', (e) => {
+  // 유튜브 — 단일 곡은 즉시 추가, 재생목록 링크는 추가 시점에 곡들로 펼쳐 넣음 (재생 경로는 언제나 단일 곡)
+  $('#yt-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const url = $('#yt-url').value.trim(); if (!url) return;
     const p = parseYouTube(url);
-    // 개별 영상 ID가 없는 재생목록 링크는 어떤 곡이 나올지 보장할 수 없어 거부 (오재생 방지)
+    const isMix = /^RD/i.test(p.listId || ''); // RD…: 유튜브 자동 믹스/라디오 — 유한한 목록이 아니라 펼칠 수 없음
     if (!p.videoId) {
+      if (p.listId && isMix) { toast('유튜브가 자동으로 만드는 믹스/라디오는 목록으로 가져올 수 없어요'); return; }
+      if (p.listId && ytCanExpand()) { await addPlaylistTracks(p.listId); return; }
+      // 구버전 preload(playlist 브리지 없음) 또는 링크 자체가 무효 — 기존 안내 유지
       toast(p.listId ? '재생목록 링크는 지원하지 않아요. 재생목록 안의 개별 영상 링크를 넣어주세요.' : '유효한 유튜브 링크가 아니에요.');
       return;
+    }
+    // 곡+재생목록이 함께 있는 링크 → 하나만/전체 중 선택 (믹스는 묻지 않고 기존대로 곡 하나만)
+    if (p.listId && !isMix && ytCanExpand()) {
+      const c = await askYtChoice();
+      if (c === null) return; // 취소
+      if (c === 'all') { await addPlaylistTracks(p.listId); return; }
     }
     const manual = $('#yt-title-in').value.trim();
     const t = { id: crypto.randomUUID(), title: manual || url, url, videoId: p.videoId, listId: p.listId };
@@ -2756,6 +2865,8 @@ async function init() {
   prefs.ytRepeat = (p.ytRepeat === 'all' || p.ytRepeat === 'one') ? p.ytRepeat : 'off';
   prefs.calMode = (p.calMode === 'month') ? 'month' : 'week';
   calMode = prefs.calMode; // 일정 보기(전체/이번주) 복원
+  prefs.workFilter = ['all', 'week', 'month'].includes(p.workFilter) ? p.workFilter : 'month';
+  workFilter = prefs.workFilter; // 작업 관리 필터(전체/주간/월) 복원
   // 수동 정렬 플래그: 구형 deadlines/commissions 플래그를 works 하나로 병합
   const pm = (p.manual && typeof p.manual === 'object') ? p.manual : {};
   prefs.manual = { ledger: !!pm.ledger, works: !!(pm.works || pm.deadlines || pm.commissions) };

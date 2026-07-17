@@ -200,6 +200,10 @@ body.is-max #tb-max .i-restore { display: block; }
 .sb-stat .ico { opacity: .8; }
 .sb-stat-label { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sb-stat b { color: var(--sidebar-text); font-weight: 700; }
+/* 오늘 요약: 클릭해서 해당 화면으로 이동 (.side-nav li 호버와 동일한 색/타이밍) */
+.sb-stat, #sb-foot-title { cursor: pointer; transition: background .13s, color .13s; }
+#sb-foot-title { border-radius: 8px; }
+.sb-stat:hover, #sb-foot-title:hover { background: var(--sidebar-active-bg); color: var(--sidebar-text); }
 
 .nav-label {
   color: var(--sidebar-text-dim);
@@ -372,6 +376,9 @@ body.is-max #tb-max .i-restore { display: block; }
 .cal-mode { margin-right: 6px; }
 .cal-mode .seg-btn { padding: 6px 13px; font-size: calc(13px * var(--fs)); font-weight: 600; }
 .cal-mode .seg-btn.on { background: var(--accent); color: var(--accent-text); font-weight: 700; }
+/* 작업 관리: 전체/주간 토글 (cal-mode와 동일 크기·강조) */
+.work-filter .seg-btn { padding: 6px 13px; font-size: calc(13px * var(--fs)); font-weight: 600; }
+.work-filter .seg-btn.on { background: var(--accent); color: var(--accent-text); font-weight: 700; }
 
 .header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .cat-filters { display: flex; gap: 4px; flex-wrap: wrap; }
