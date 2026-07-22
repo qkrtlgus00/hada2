@@ -7,6 +7,36 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>하다 — 스케줄</title>
   <link rel="stylesheet" href="styles.css" />
+  <!-- 음악 재생바(진행바) 자체 스타일 — styles.css 뒤에 두어 우선 적용. 테마 무관 고정색으로 항상 또렷 -->
+  <style>
+    #yt-nowplaying { flex-direction: column; align-items: stretch; gap: 8px; }
+    #yt-nowplaying .yt-np-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    #yt-nowplaying .yt-np-progress { display: flex; align-items: center; gap: 10px; }
+    /* 진행바: 라이트/다크 모두 대비되는 고정 회색 트랙 + 강조색 썸 */
+    .yt-seek {
+      -webkit-appearance: none; appearance: none;
+      flex: 1 1 auto; min-width: 120px; height: 8px; margin: 0;
+      background: rgba(127,127,127,.35); border-radius: 999px; outline: none;
+      cursor: pointer;
+    }
+    .yt-seek:disabled { opacity: .85; cursor: default; }
+    .yt-seek::-webkit-slider-runnable-track { height: 8px; border-radius: 999px; background: transparent; }
+    .yt-seek::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 16px; height: 16px; margin-top: -4px; border-radius: 50%;
+      background: var(--view-accent, #e5487f); border: 2px solid #fff;
+      box-shadow: 0 1px 3px rgba(0,0,0,.35);
+    }
+    .yt-seek::-moz-range-track { height: 8px; border-radius: 999px; background: rgba(127,127,127,.35); }
+    .yt-seek::-moz-range-thumb {
+      width: 16px; height: 16px; border-radius: 50%;
+      background: var(--view-accent, #e5487f); border: 2px solid #fff;
+      box-shadow: 0 1px 3px rgba(0,0,0,.35);
+    }
+    .yt-time { font: 12px/1 ui-monospace, "Consolas", monospace; color: var(--text-dim, #8a8f9a); white-space: nowrap; }
+    /* 이전/다음 곡 버튼 안의 선 아이콘 세로 중앙 정렬 (텍스트 버튼과 높이 맞춤) */
+    #yt-prev, #yt-next { display: inline-flex; align-items: center; justify-content: center; }
+  </style>
 </head>
 <body>
   <!-- ============ 커스텀 타이틀바 (OS 창틀 대신 앱이 직접 그림) ============ -->
@@ -204,12 +234,20 @@
       <section class="view-pad" data-view="youtube" id="youtube-view" hidden>
         <h1 class="view-title">음악</h1>
         <div class="yt-nowplaying" id="yt-nowplaying">
-          <span class="ico" data-icon="music"></span>
-          <span class="yt-np-title" id="yt-np-title">재생 중인 곡이 없어요</span>
-          <button type="button" class="yt-np-btn" id="yt-toggle" title="재생/일시정지" disabled></button>
-          <button type="button" class="yt-np-btn" id="yt-repeat" title="반복">반복 없음</button>
-          <input type="range" id="yt-volume" class="yt-np-vol" min="0" max="100" step="1" value="100" title="음량" />
-          <button type="button" class="yt-np-btn" id="yt-stop" title="정지" disabled>정지</button>
+          <div class="yt-np-top">
+            <span class="ico" data-icon="music"></span>
+            <span class="yt-np-title" id="yt-np-title">재생 중인 곡이 없어요</span>
+            <button type="button" class="yt-np-btn" id="yt-prev" title="이전 곡" disabled><span class="ico" data-icon="skipPrev"></span></button>
+            <button type="button" class="yt-np-btn" id="yt-toggle" title="재생/일시정지" disabled></button>
+            <button type="button" class="yt-np-btn" id="yt-next" title="다음 곡" disabled><span class="ico" data-icon="skipNext"></span></button>
+            <button type="button" class="yt-np-btn" id="yt-repeat" title="반복">반복 없음</button>
+            <input type="range" id="yt-volume" class="yt-np-vol" min="0" max="100" step="1" value="100" title="음량" />
+            <button type="button" class="yt-np-btn" id="yt-stop" title="정지" disabled>정지</button>
+          </div>
+          <div class="yt-np-progress">
+            <input type="range" id="yt-seek" class="yt-seek" min="0" max="1000" step="1" value="0" disabled title="재생 위치 (드래그로 이동)" />
+            <span class="yt-time" id="yt-time">0:00 / 0:00</span>
+          </div>
         </div>
         <form id="yt-form" class="ledger-form" autocomplete="off">
           <input id="yt-url" type="text" placeholder="유튜브 링크 또는 재생목록 URL" required />

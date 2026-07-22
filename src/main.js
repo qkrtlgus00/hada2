@@ -529,6 +529,7 @@ function setupYtSession() {
     '*://*.youtube.com/api/stats/atr*', '*://*.youtube.com/pcs/activeview*',
     '*://*.youtube.com/youtubei/v1/log_event*',
     '*://*.youtube.com/get_midroll_*', '*://*.youtube.com/get_video_info*ad*',
+    '*://*.youtube.com/youtubei/v1/player/ad_break*', '*://*.youtube.com/youtubei/v1/ad_break*',
   ];
   sess.webRequest.onBeforeRequest({ urls: adHosts }, (_details, cb) => cb({ cancel: true }));
 }
@@ -547,8 +548,17 @@ const YT_ADSTRIP_JS = "(function(){" +
   "var K=['adPlacements','adSlots','playerAds','adBreakHeartbeatParams'];" +
   "function strip(o){try{if(o&&typeof o==='object'){for(var i=0;i<K.length;i++){if(K[i] in o){try{delete o[K[i]];}catch(e){}}}" +
     "if(o.playerResponse)strip(o.playerResponse);}}catch(e){}return o;}" +
+  // 플레이어 응답 여부 대략 판정 (streamingData 또는 광고 필드 존재) — URL을 못 얻는 경우의 폴백 판정
+  "function isPR(o){return !!(o&&typeof o==='object'&&(o.streamingData||o.playerAds||o.adPlacements||(o.playerResponse&&(o.playerResponse.streamingData||o.playerResponse.adPlacements))));}" +
+  // ① 초기 HTML 플레이어 응답 (첫 전체 로드)
   "try{var _p;Object.defineProperty(window,'ytInitialPlayerResponse',{configurable:true," +
     "get:function(){return _p;},set:function(v){_p=strip(v);}});}catch(e){}" +
+  // ② SPA 전환곡(loadVideoById)은 플레이어 응답을 XHR/fetch로 새로 받아옴 → 초기 HTML 트랩을 안 거침.
+  //    응답을 '읽는 시점'(.json()/.text())에 광고 필드 삭제. 응답 URL이 /youtubei/v1/player 인 것만 처리
+  //    (그 외엔 원본 그대로). 어떤 예외든 원본 반환 → 재생/파싱을 절대 깨지 않음(킬스위치 YT_AD_STRIP).
+  "try{var _rj=Response.prototype.json;Response.prototype.json=function(){var s=this;return _rj.apply(this,arguments).then(function(j){try{if((s&&s.url&&s.url.indexOf('/youtubei/v1/player')!==-1)||isPR(j))strip(j);}catch(e){}return j;});};}catch(e){}" +
+  "try{var _rt=Response.prototype.text;Response.prototype.text=function(){var s=this;return _rt.apply(this,arguments).then(function(t){try{if(s&&s.url&&s.url.indexOf('/youtubei/v1/player')!==-1){var j=JSON.parse(t);strip(j);return JSON.stringify(j);}}catch(e){}return t;});};}catch(e){}" +
+  "window.__adStripNet=true;" +
   "})();";
 // 프리로드 파일을 userData에 런타임 생성 — UP_FILES(자체 업데이트 파일 목록)에 새 파일을 추가하면
 // 구버전 업데이터가 못 받는 닭-달걀 문제가 있어, main.js가 직접 써서 배포/업데이트 경로와 무관하게 동작.
@@ -591,8 +601,9 @@ function ytPlayJs(vol, want) {
       "var adp=false; try{adp=!!(mp&&mp.getAdState&&mp.getAdState()===1);}catch(e){}" +
       "var adc=!!(p&&p.classList.contains('ad-showing'));" +
       "if((adp||adc)&&window.__ytwant!==false){" + // 일시정지 중엔 스킵 클릭/빨리감기 금지 — 플레이어를 되살릴 수 있음 (__setvol은 위에서 계속)
-        "var s=document.querySelector('.ytp-ad-skip-button,.ytp-ad-skip-button-modern,.ytp-skip-ad-button,.ytp-ad-skip-button-slot button,.ytp-ad-skip-button-container button');" +
+        "var s=document.querySelector('.ytp-ad-skip-button,.ytp-ad-skip-button-modern,.ytp-skip-ad-button,.ytp-ad-skip-button-slot button,.ytp-ad-skip-button-container button,.ytp-ad-skip-button-modern.ytp-button');" +
         "if(s){s.click();}" +
+        "var oc=document.querySelector('.ytp-ad-overlay-close-button,.ytp-ad-overlay-close-container button');if(oc){oc.click();}" + // 오버레이/배너 광고 닫기 (본곡 재생 중에도 안전)
         "if(adp && av&&av.duration&&isFinite(av.duration)){av.currentTime=av.duration;}" + // 확정 광고(getAdState===1)에서만 빨리감기 — ad-showing 클래스만으론 본곡을 끝내지 않음
       "}" +
     "}catch(e){}},400);}" +
@@ -705,7 +716,8 @@ ipcMain.handle('youtube:play', async (_e, url) => {
     ytExpectedId = m ? m[1] : '';
     ytEndedSent = false;
     ytWantPlaying = true; // 새 곡은 항상 재생 — loadURL 전에 게이트를 열어 이후 주입(ytPlayJs)이 play() 하게
-    if (!ytWindow || ytWindow.isDestroyed()) {
+    const freshWindow = (!ytWindow || ytWindow.isDestroyed());
+    if (freshWindow) {
       const ytPre = ensureYtPreload();
       ytWindow = new BrowserWindow({
         width: 480,
@@ -760,10 +772,26 @@ ipcMain.handle('youtube:play', async (_e, url) => {
     ytNavGen++;
     const gen = ytNavGen;
     ytNavPending = true;
-    ytWindow.loadURL(url).catch((e) => {
-      if (gen === ytNavGen) ytNavPending = false; // 실패 → 게이트 해제(기존 드리프트 로직이 곡 진행을 복구)
-      console.warn('[yt] loadURL failed:', String((e && e.message) || e));
-    });
+    const doFullLoad = () => {
+      ytWindow.loadURL(url).catch((e) => {
+        if (gen === ytNavGen) ytNavPending = false; // 실패 → 게이트 해제(기존 드리프트 로직이 곡 진행을 복구)
+        console.warn('[yt] loadURL failed:', String((e && e.message) || e));
+      });
+    };
+    // 이미 열린 창 + 유효 videoId → 전체 새로고침 대신 '페이지 내 전환'으로 곡만 교체(플레이어 재사용,
+    // 부팅 없이 수백 ms). onNav 가드/폴링이 새 id 기준으로 이어짐. did-navigate-in-page가 ytNavPending 해제.
+    // 새 창이거나 videoId 없음(재생목록 전용)이거나 플레이어 미존재(false 반환)면 기존 loadURL로 폴백.
+    // ytExpectedId는 정규식 [a-zA-Z0-9_-]{11}로만 매치돼 안전(문자열 인터폴레이션 OK).
+    if (!freshWindow && ytExpectedId) {
+      const swapJs = "(function(){try{var mp=document.querySelector('#movie_player');" +
+        "if(mp&&mp.loadVideoById){window.__ytwant=true;window.__ytvol=" + ytVolume + ";" +
+        "mp.loadVideoById('" + ytExpectedId + "');if(window.__setvol)window.__setvol();return true;}return false;}catch(e){return false;}})();";
+      ytWindow.webContents.executeJavaScript(swapJs)
+        .then((ok) => { if (!ok && gen === ytNavGen) doFullLoad(); })
+        .catch(() => { if (gen === ytNavGen) doFullLoad(); });
+    } else {
+      doFullLoad();
+    }
     startYtPoll(); // 즉시 시작 (음소거 제어 + 드리프트/종료 감지) — 준비되는 순간 소리가 난다
     return { ok: true };
   } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
@@ -794,11 +822,15 @@ function startYtPoll() {
         "try{lv=(location.search.match(/[?&]v=([a-zA-Z0-9_-]{11})/)||[])[1]||'';}catch(e){}" +
         "var p=document.querySelector('.html5-video-player');adc=!!(p&&p.classList.contains('ad-showing'));" +
         "try{if(window.__setvol){window.__setvol();}else{var vv=document.querySelectorAll('video');for(var i=0;i<vv.length;i++)vv[i].volume=window.__ytvol;}}catch(e){}" +
-        "return {ended:v?v.ended:false,d:v?v.duration:0,adp:adp,adc:adc,vid:vid,lv:lv," +
+        "return {ended:v?v.ended:false,d:v?v.duration:0,ct:v?v.currentTime:0,adp:adp,adc:adc,vid:vid,lv:lv," +
         "playing:!!(v&&!v.paused&&!v.ended&&v.currentTime>0.1),vol:(v?v.volume:window.__ytvol)};" +
         "})();"
       );
       if (!st) return;
+      // 진행바 갱신: 재생 위치/길이를 렌더러에 보고 (곡 진행 중일 때만)
+      if (st.d > 0 && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('youtube:progress', st.ct || 0, st.d || 0);
+      }
       const drift = !!(ytExpectedId && st.vid && st.vid !== ytExpectedId);
       // v1.15.4 광고 판별 분리: adp=확정 광고(getAdState===1 — 광고가 '현재 미디어'로 재생 중),
       // adc=ad-showing 클래스만(오버레이/배너 광고는 본곡이 재생 중에도 붙음 → 음소거하면 곡 중간 무음).
@@ -875,6 +907,16 @@ ipcMain.handle('youtube:setVolume', async (_e, v) => {
   if (!Number.isFinite(n)) return { ok: false, error: 'BAD_VOLUME' };
   ytVolume = Math.max(0, Math.min(100, Math.round(n))) / 100;
   await ytExec("window.__ytvol=" + ytVolume + "; if(window.__setvol){window.__setvol();} else {var v=document.querySelector('video'); if(v){v.volume=" + ytVolume + ";}}");
+  return { ok: true };
+});
+// 현재 곡의 특정 구간(초)으로 이동 (진행바 드래그) — 0~duration으로 클램프.
+// __ytwant!==false(일시정지 아님)일 때만 play() → 일시정지 중 드래그가 재생을 되살리지 않게.
+ipcMain.handle('youtube:seek', async (_e, sec) => {
+  const n = Number(sec);
+  if (!Number.isFinite(n) || n < 0) return { ok: false, error: 'BAD_SEC' };
+  await ytExec("(function(){try{var v=document.querySelector('video');" +
+    "if(v&&isFinite(v.duration)&&v.duration>0){v.currentTime=Math.max(0,Math.min(" + n + ",v.duration));" +
+    "if(window.__ytwant!==false){v.play&&v.play();}}}catch(e){}})();");
   return { ok: true };
 });
 
