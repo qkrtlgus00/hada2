@@ -35,12 +35,16 @@ contextBridge.exposeInMainWorld('api', {
     stop: () => ipcRenderer.invoke('youtube:stop'),
     /** 음량 (0~100) */
     setVolume: (v) => ipcRenderer.invoke('youtube:setVolume', v),
+    /** 현재 곡의 특정 구간(초)으로 이동 (진행바 드래그) */
+    seek: (sec) => ipcRenderer.invoke('youtube:seek', sec),
     /** oEmbed로 영상 실제 제목 가져오기 (제목 자동 채우기) */
     fetchTitle: (url) => ipcRenderer.invoke('youtube:title', url),
     /** 재생목록을 개별 곡 목록으로 펼치기 (추가할 때 1회 사용) */
     playlist: (listId) => ipcRenderer.invoke('youtube:playlist', listId),
     /** 현재 곡 재생 종료 시 콜백 (다음 곡 자동재생용) */
     onEnded: (cb) => ipcRenderer.on('youtube:ended', () => cb()),
+    /** 재생 진행 상황 콜백 (현재초, 전체초) — 진행바 갱신용 */
+    onProgress: (cb) => ipcRenderer.on('youtube:progress', (_e, ct, d) => cb(ct, d)),
   },
 
   /** 트레이 메뉴 → 렌더러 재생 제어 (playpause / next) */

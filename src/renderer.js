@@ -39,6 +39,10 @@ let bannerCfg = { height: 180, zoom: 100 }; // 배너 높이(px)·줌(%)
 let stickers = [];    // [{id,view,src,x,y,w}]
 let ytCurrent = null; // 현재 재생 중 트랙 id
 let ytPlaying = false; // 백그라운드 오디오 재생 상태
+let ytDur = 0;         // 현재 곡 전체 길이(초) — 진행바 max/시크 계산용
+let ytSeeking = false; // 진행바 드래그 중 — true면 진행 콜백이 슬라이더를 덮어쓰지 않음
+let ytSkipTarget = -1; // 이전/다음 연타 디바운스용 대기 인덱스 (-1 = 없음)
+let ytSkipTimer = null; // 연타 디바운스 타이머
 let ledgerType = 'expense'; // 가계부 입력 구분
 let ledgerStatsType = 'expense'; // 통계(이 달 분석) 구분 토글 — 세션 유지, 저장 안 함
 let currentView = 'calendar';
@@ -193,6 +197,8 @@ const ICONS = {
   x: '<path d="M6 6l12 12M18 6 6 18"/>',
   chevronLeft: '<path d="M15 5l-7 7 7 7"/>',
   chevronRight: '<path d="M9 5l7 7-7 7"/>',
+  skipPrev: '<path d="M7 6v12"/><path d="M19 6 10 12l9 6z"/>',
+  skipNext: '<path d="M17 6v12"/><path d="M5 6l9 6-9 6z"/>',
   play: '<path d="M7 5l12 7-12 7z"/>',
   panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
   sticker: '<path d="M4 4h10a6 6 0 0 1 6 6v0l-10 10H4z"/><path d="M14 20a6 6 0 0 0 6-6h-4a2 2 0 0 0-2 2z"/>',
@@ -2058,7 +2064,14 @@ function playTrack(id) {
   if (!t) return;
   // 개별 영상 ID가 없는(재생목록 전용) 트랙은 어떤 곡이 나올지 보장 못 함 → 재생 불가
   if (!t.videoId) { toast('재생목록 링크는 재생할 수 없어요. 재생목록 안의 개별 영상 링크로 추가해주세요.'); return; }
+  // 직접 재생(행 클릭 등)은 대기 중인 연타 스킵을 취소하고 이 곡을 즉시 재생
+  if (ytSkipTimer) { clearTimeout(ytSkipTimer); ytSkipTimer = null; } ytSkipTarget = -1;
   ytCurrent = id;
+  // 새 곡 시작 → 진행 표시 리셋 (이전 곡의 위치/길이가 잠깐 남지 않게)
+  ytDur = 0; ytSeeking = false;
+  const seek = $('#yt-seek'), time = $('#yt-time');
+  if (seek) seek.value = '0';
+  if (time) time.textContent = '0:00 / 0:00';
   const url = ytWatchUrl(t);
   if (window.api.youtube && window.api.youtube.play) {
     window.api.youtube.play(url);
@@ -2076,6 +2089,7 @@ function ytToggle() {
   renderNowPlaying();
 }
 function ytStop() {
+  if (ytSkipTimer) { clearTimeout(ytSkipTimer); ytSkipTimer = null; } ytSkipTarget = -1;
   if (window.api.youtube) window.api.youtube.stop();
   ytPlaying = false; ytCurrent = null;
   renderNowPlaying(); renderYouTube();
@@ -2086,6 +2100,27 @@ function nextTrackId(list, curId) {
   const i = list.findIndex((x) => x.id === curId);
   if (i < 0 || i + 1 >= list.length) return null;
   return list[i + 1].id;
+}
+// 목록에서 curId 이전 트랙 id (없으면 null) — 이전 곡 버튼용 (순수)
+function prevTrackId(list, curId) {
+  if (!Array.isArray(list)) return null;
+  const i = list.findIndex((x) => x.id === curId);
+  if (i <= 0) return null;
+  return list[i - 1].id;
+}
+// 길이 len 목록에서 from 인덱스 기준 delta 이동한 순환 인덱스. 빈 목록이면 -1. (순수)
+function wrapIndex(len, from, delta) {
+  if (!len || len <= 0) return -1;
+  const base = (Number.isFinite(from) && from >= 0) ? from : 0;
+  return (((base + delta) % len) + len) % len;
+}
+// 초 → "m:ss" (1시간 이상이면 "h:mm:ss") — 진행바 시간 라벨 (순수)
+function fmtDur(sec) {
+  let s = Math.max(0, Math.floor(Number(sec) || 0));
+  const h = Math.floor(s / 3600); s -= h * 3600;
+  const m = Math.floor(s / 60); s -= m * 60;
+  const pad = (n) => String(n).padStart(2, '0');
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 }
 // 반복 모드 반영해 다음 재생 id 결정 (순수). null이면 정지.
 function resolveNextId(list, curId, repeat) {
@@ -2100,6 +2135,41 @@ function playNext() {
   const n = resolveNextId(playlist, ytCurrent, prefs.ytRepeat);
   if (n) playTrack(n);
   else ytStop();
+}
+// 수동 이전/다음 — 목록을 순환(wrap)해 이동. 연타를 모아 마지막 1곡만 로드(낭비 제거) +
+// 대상 곡 제목을 즉시 표시해 반응감↑. 실제 재생(playTrack)은 220ms 디바운스 후 1회.
+function skipBy(delta) {
+  if (!playlist.length) return;
+  // 대기 중이면 그 대기 위치에서 누적 이동, 아니면 현재 곡 기준
+  const from = (ytSkipTimer != null && ytSkipTarget >= 0)
+    ? ytSkipTarget
+    : playlist.findIndex((x) => x.id === ytCurrent);
+  ytSkipTarget = wrapIndex(playlist.length, from, delta);
+  if (ytSkipTarget < 0) return;
+  const t = playlist[ytSkipTarget];
+  // 제목 즉시 미리 표시 + 진행바 리셋 (실제 로드는 디바운스 후)
+  const title = $('#yt-np-title'); if (title && t) title.textContent = t.title || t.url;
+  const seek = $('#yt-seek'), time = $('#yt-time');
+  if (seek) seek.value = '0';
+  if (time) time.textContent = '0:00 / 0:00';
+  if (ytSkipTimer) clearTimeout(ytSkipTimer);
+  ytSkipTimer = setTimeout(() => {
+    ytSkipTimer = null;
+    const target = ytSkipTarget; ytSkipTarget = -1;
+    if (target >= 0 && playlist[target]) playTrack(playlist[target].id);
+  }, 220);
+}
+function skipPrev() { skipBy(-1); }
+function skipNext() { skipBy(1); }
+// 재생 진행 콜백 — 메인의 youtube:progress(현재초, 전체초) 수신. 드래그 중이면 슬라이더는 건드리지 않음.
+function updateProgress(ct, d) {
+  ytDur = Number(d) || 0;
+  const seek = $('#yt-seek'), time = $('#yt-time');
+  if (!seek) return;
+  if (!ytSeeking) {
+    seek.value = String(ytDur > 0 ? Math.max(0, Math.min(1000, Math.round((ct / ytDur) * 1000))) : 0);
+  }
+  if (time) time.textContent = `${fmtDur(ytSeeking ? (Number(seek.value) / 1000) * ytDur : ct)} / ${fmtDur(ytDur)}`;
 }
 const YT_REPEAT_LABEL = { off: '반복 없음', all: '전체 반복', one: '1곡 반복' };
 function cycleRepeat() {
@@ -2116,6 +2186,19 @@ function renderNowPlaying() {
   if (rep) { rep.textContent = YT_REPEAT_LABEL[prefs.ytRepeat] || '반복 없음'; rep.classList.toggle('active', prefs.ytRepeat !== 'off'); }
   const vol = $('#yt-volume');
   if (vol && Number(vol.value) !== prefs.ytVolume) vol.value = String(prefs.ytVolume);
+  // 이전/다음 버튼: 목록에 2곡 이상 있고 재생 중일 때만
+  const prev = $('#yt-prev'), next = $('#yt-next');
+  const canSkip = !!cur && playlist.length > 1;
+  if (prev) prev.disabled = !canSkip;
+  if (next) next.disabled = !canSkip;
+  // 진행바: 곡 없으면 0으로 리셋 + 비활성
+  const seek = $('#yt-seek'), time = $('#yt-time');
+  if (seek) seek.disabled = !cur;
+  if (!cur) {
+    ytDur = 0;
+    if (seek && !ytSeeking) seek.value = '0';
+    if (time) time.textContent = '0:00 / 0:00';
+  }
 }
 function renderYouTube() {
   renderNowPlaying();
@@ -2709,6 +2792,22 @@ function bindUI() {
   const ytT = $('#yt-toggle'); if (ytT) ytT.addEventListener('click', ytToggle);
   const ytS = $('#yt-stop'); if (ytS) ytS.addEventListener('click', ytStop);
   const ytR = $('#yt-repeat'); if (ytR) ytR.addEventListener('click', cycleRepeat);
+  // 이전/다음 곡 버튼 (수동 — 목록 순환)
+  const ytP = $('#yt-prev'); if (ytP) ytP.addEventListener('click', skipPrev);
+  const ytN = $('#yt-next'); if (ytN) ytN.addEventListener('click', skipNext);
+  // 진행바(시크): input=드래그 미리보기(시간만), change=놓는 순간 그 구간으로 이동
+  const ytSeek = $('#yt-seek'), ytTime = $('#yt-time');
+  if (ytSeek) {
+    ytSeek.addEventListener('input', () => {
+      ytSeeking = true;
+      if (ytTime && ytDur > 0) ytTime.textContent = `${fmtDur((Number(ytSeek.value) / 1000) * ytDur)} / ${fmtDur(ytDur)}`;
+    });
+    ytSeek.addEventListener('change', () => {
+      const sec = (Number(ytSeek.value) / 1000) * ytDur;
+      if (ytDur > 0 && window.api.youtube && window.api.youtube.seek) window.api.youtube.seek(sec);
+      ytSeeking = false;
+    });
+  }
   // 음량 슬라이더 (드래그 중 실시간 반영 — 광고 음소거와 분리돼 광고 후에도 음량 유지)
   const ytV = $('#yt-volume');
   if (ytV) ytV.addEventListener('input', () => {
@@ -2718,6 +2817,8 @@ function bindUI() {
   });
   // 곡 끝나면 목록 다음 곡 자동 재생
   if (window.api.youtube && window.api.youtube.onEnded) window.api.youtube.onEnded(playNext);
+  // 재생 진행 상황 수신 → 진행바/시간 갱신
+  if (window.api.youtube && window.api.youtube.onProgress) window.api.youtube.onProgress(updateProgress);
   // 트레이 메뉴 재생 제어
   if (window.api.onTrayControl) window.api.onTrayControl((action) => {
     if (action === 'playpause') ytToggle();
@@ -2954,7 +3055,7 @@ if (typeof module !== 'undefined' && module.exports) {
     hexToRgb, luminance, idealText,
     monthGrid, recurringDueOn, formatWon, monthKey, sumLedger, sumByCategory,
     daysUntil, ddayLabel, computeStreak, icon, parseYouTube, textToHtml, migrateWork, loadWorks,
-    mix, stripHtml, ytWatchUrl, nextTrackId, resolveNextId, reorderByIds, VIEW_COLORS, VIEW_META, viewAccent,
+    mix, stripHtml, ytWatchUrl, nextTrackId, prevTrackId, resolveNextId, fmtDur, wrapIndex, reorderByIds, VIEW_COLORS, VIEW_META, viewAccent,
     clampInt, eventRemindKey, eventRemindAt, deadlineRemindAt, dueReminders,
     DAY_START, DAY_END, HOUR_HEIGHT,
   };
